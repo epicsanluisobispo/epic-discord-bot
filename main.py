@@ -16,6 +16,7 @@ from bot_commands import register_commands
 from web_server import start_flask_in_background_thread
 from media_sheet import setup_media_sheet_task
 from event_sheet import setup_event_sheet_task
+from link_board import setup_link_board_task
 
 logging.basicConfig(level=logging.INFO)
 
@@ -32,11 +33,12 @@ register_commands(bot)
 
 _media_sheet_task_started = False
 _event_sheet_task_started = False
+_link_board_task_started = False
 
 
 @bot.event
 async def on_ready():
-    global _media_sheet_task_started, _event_sheet_task_started
+    global _media_sheet_task_started, _event_sheet_task_started, _link_board_task_started
 
     print(f"✅ Logged in as {bot.user}")
     await log_to_discord(f"🤖 Bot started as {bot.user}")
@@ -49,6 +51,10 @@ async def on_ready():
     if not _event_sheet_task_started:
         setup_event_sheet_task(bot)
         _event_sheet_task_started = True
+
+    if not _link_board_task_started:
+        setup_link_board_task(bot)
+        _link_board_task_started = True
 
 
 @bot.event

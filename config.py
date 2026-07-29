@@ -23,6 +23,10 @@ ETL_NOTIFICATIONS_CHANNEL_ID = 1395968665287135262
 # Media-request specific channel.
 MEDIA_TEAM_CHANNEL_ID = 1388259539714969830
 
+# Where the live-updating "active links" embed is posted and kept edited
+# in place (replaces the old Google Sites / Flask "/media-links" page).
+LINK_BOARD_CHANNEL_ID = 1532078440021491843
+
 # "Large group slides" channel. This is the same channel used both when
 # announcing an approved media request that needs a slide, and as the
 # "large group" team channel for approved event requests.
@@ -41,6 +45,8 @@ EVENT_TEAM_CHANNEL_MAP = {
     "boys t1": 1388259868959441047,
     "girls t1": 1388259923078549504,
     "retreats": 1388259981001887744,
+    "prayer": 1517743338281767013,
+    "staff": 1517743843041218660
 }
 
 # ----------------------------------------------------------------------
