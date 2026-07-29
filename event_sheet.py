@@ -29,6 +29,7 @@ from google_auth import (
     get_calendar_service,
     SPREADSHEET_AND_CALENDAR_SCOPES,
 )
+from logging_utils import log_to_discord
 
 gspread_client, google_credentials = get_sheets_client_and_credentials(SPREADSHEET_AND_CALENDAR_SCOPES)
 calendar_service = get_calendar_service(google_credentials)
@@ -85,21 +86,26 @@ async def create_discord_scheduled_event(guild, name, start_datetime, end_dateti
         return scheduled_event.id
     except Exception as error:
         print(f"❌ Failed to create Discord event '{name}': {error}")
+        await log_to_discord(f"❌ Failed to create Discord event **{name}**: {error}")
         return None
 
 
-async def update_discord_scheduled_event(guild, discord_event_id, name, start_datetime, end_datetime, description=""):
+async def update_discord_scheduled_event(
+    guild, discord_event_id, name, start_datetime, end_datetime, location="TBA", description=""
+):
     try:
         scheduled_event = await guild.fetch_scheduled_event(discord_event_id)
         await scheduled_event.edit(
             name=name,
             start_time=start_datetime,
             end_time=end_datetime,
+            location=location,
             description=description,
         )
         print(f"🔄 Discord event updated: {name}")
     except Exception as error:
         print(f"❌ Failed to update Discord event '{name}': {error}")
+        await log_to_discord(f"❌ Failed to update Discord event **{name}**: {error}")
 
 
 async def delete_discord_scheduled_event(guild, discord_event_id):
@@ -109,6 +115,7 @@ async def delete_discord_scheduled_event(guild, discord_event_id):
         print(f"🗑 Discord event deleted: {scheduled_event.name}")
     except Exception as error:
         print(f"❌ Failed to delete Discord event ID {discord_event_id}: {error}")
+        await log_to_discord(f"❌ Failed to delete Discord event ID {discord_event_id}: {error}")
 
 
 def setup_event_sheet_task(bot):
@@ -122,6 +129,7 @@ def setup_event_sheet_task(bot):
                 all_rows = await asyncio.to_thread(worksheet.get_all_values)
             except Exception as error:
                 print(f"[Error loading tab '{tab_name}']: {error}")
+                await log_to_discord(f"❌ Failed to load event sheet tab '{tab_name}': {error}")
                 continue
 
             for row_index, row in enumerate(all_rows):
@@ -137,6 +145,7 @@ def setup_event_sheet_task(bot):
                 event_date_str = row[12].strip()                   # Column M
                 event_start_time_str = row[13].strip()             # Column N
                 event_end_time_str = row[14].strip()               # Column O
+                event_location = row[15].strip()                   # Column P
                 josh_approval_status = row[23].strip().lower()     # Column X
                 nikki_approval_status = row[24].strip().lower()    # Column Y
                 ellie_approval_status = row[25].strip().lower()    # Column Z
@@ -187,6 +196,9 @@ def setup_event_sheet_task(bot):
                                     )
                                 except Exception as calendar_error:
                                     print(f"🛑 Calendar event failed: {calendar_error}")
+                                    await log_to_discord(
+                                        f"❌ Failed to create calendar event **{event_description}**: {calendar_error}"
+                                    )
 
                                 guild = bot.guilds[0]
                                 days_until_event = (event_start_datetime - now).days
@@ -207,7 +219,8 @@ def setup_event_sheet_task(bot):
                                             event_description,
                                             event_start_datetime,
                                             event_end_datetime,
-                                            event_description,
+                                            location=event_location or "TBA",
+                                            description=event_description,
                                         )
                                 else:
                                     if event_is_within_creation_window:
@@ -216,6 +229,7 @@ def setup_event_sheet_task(bot):
                                             event_description,
                                             event_start_datetime,
                                             event_end_datetime,
+                                            location=event_location or "TBA",
                                             description=event_description,
                                         )
                                         if new_discord_event_id:
