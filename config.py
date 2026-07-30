@@ -46,7 +46,7 @@ EVENT_TEAM_CHANNEL_MAP = {
     "girls t1": 1388259923078549504,
     "retreats": 1388259981001887744,
     "prayer": 1517743338281767013,
-    "staff": 1517743843041218660
+    "staff": 1517743843041218660,
 }
 
 # ----------------------------------------------------------------------
@@ -70,6 +70,10 @@ EVENT_DISCORD_EVENT_ID_COLUMN = 29          # Column AC
 
 # Google Calendar that approved events get added to.
 EVENT_CALENDAR_ID = "epicsanluisobispo@gmail.com"
+
+DISCIPLESHIP_SHEET_URL = "https://docs.google.com/spreadsheets/d/1FCRT3zspJur8KMaBsw6xhflZjEAaQyMSvlvEW0w4pgg/edit"
+DISCIPLESHIP_SHEET_TAB = "New form responses"
+DISCIPLESHIP_NOTIFIED_STATUS_COLUMN = 27  # Column AA
 
 # ----------------------------------------------------------------------
 # Role eligibility rules
