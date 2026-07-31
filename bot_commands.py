@@ -9,6 +9,7 @@ from discord.ext import commands
 
 from logging_utils import log_to_discord
 from role_manager import apply_role_rules_to_member, sweep_all_guild_members
+from diagnostics import build_status_report, build_pending_report
 
 
 def register_commands(bot):
@@ -59,3 +60,17 @@ def register_commands(bot):
 
         await ctx.send(f"✅ Migrated {migrated_member_count} members to {target_role.name}.")
         await log_to_discord(f"✅ Batch role migration completed. {migrated_member_count} members updated.")
+
+    @bot.command()
+    @commands.has_permissions(administrator=True)
+    async def status(ctx):
+        await ctx.send("🔍 Checking status, one moment...")
+        report = await build_status_report()
+        await ctx.send(report)
+
+    @bot.command()
+    @commands.has_permissions(administrator=True)
+    async def pending(ctx):
+        await ctx.send("🔍 Gathering pending requests, one moment...")
+        report = await build_pending_report()
+        await ctx.send(report)

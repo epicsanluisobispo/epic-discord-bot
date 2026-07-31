@@ -76,6 +76,46 @@ DISCIPLESHIP_SHEET_TAB = "New form responses"
 DISCIPLESHIP_NOTIFIED_STATUS_COLUMN = 27  # Column AA
 
 # ----------------------------------------------------------------------
+# Stale-request reminders
+# ----------------------------------------------------------------------
+# If a request has been sitting unapproved for this many days, the bot
+# nudges the ETL channel once (per request) as a reminder.
+REQUEST_REMINDER_THRESHOLD_DAYS = 14
+
+# Column J ("date form open") on the media sheet doubles as the
+# submission date for reminder purposes.
+MEDIA_REMINDER_SENT_STATUS_COLUMN = 26  # Column Z
+
+# ASSUMPTION, please confirm: column A on the event request sheet is a
+# Google Forms "Timestamp" column recording when the request was
+# submitted. If that's not what column A actually contains, this
+# threshold logic will need a different column.
+EVENT_SUBMITTED_TIMESTAMP_COLUMN = 1    # Column A
+EVENT_REMINDER_SENT_STATUS_COLUMN = 30  # Column AD
+
+# ----------------------------------------------------------------------
+# Background task health monitoring
+# ----------------------------------------------------------------------
+# How often (seconds) the health monitor checks whether each polling task
+# has completed a successful run recently.
+TASK_HEALTH_CHECK_INTERVAL_SECONDS = 60
+
+# If a task hasn't completed a successful run in this many seconds, the
+# health monitor posts a one-time warning to the log channel (it re-warns
+# only after the task recovers and then goes stale again).
+TASK_STALE_THRESHOLD_SECONDS = 300  # 5 minutes
+
+# Human-readable names for each polling task, used by the health monitor
+# and the !status command. Keys must match the names each task registers
+# itself under via task_health.record_task_success(...).
+TASK_DISPLAY_NAMES = {
+    "media_sheet": "Media sheet poller",
+    "event_sheet": "Event request sheet poller",
+    "link_board": "Link board updater",
+    "discipleship_form": "Discipleship form poller",
+}
+
+# ----------------------------------------------------------------------
 # Role eligibility rules
 # ----------------------------------------------------------------------
 # Each rule grants `grants_role_named` to a member if the member already

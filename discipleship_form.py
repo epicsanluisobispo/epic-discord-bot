@@ -19,6 +19,9 @@ from config import (
 )
 from google_auth import get_sheets_client
 from logging_utils import log_to_discord
+from task_health import record_task_success
+
+TASK_NAME = "discipleship_form"
 
 gspread_client = get_sheets_client()
 spreadsheet = gspread_client.open_by_url(DISCIPLESHIP_SHEET_URL)
@@ -36,45 +39,59 @@ def _blocking_update_cell(worksheet, row_number, column_number, value):
 def setup_discipleship_form_task(bot):
     @tasks.loop(seconds=SHEET_POLL_INTERVAL_SECONDS)
     async def check_discipleship_form_for_new_entries():
-        event_loop = asyncio.get_running_loop()
-
+        # Top-level safety net: an unhandled exception here would otherwise
+        # silently kill this loop forever. Catching it keeps the task alive
+        # to try again next cycle, and surfaces the failure instead of
+        # letting it disappear.
         try:
-            worksheet, all_rows = await asyncio.wait_for(
-                event_loop.run_in_executor(
-                    None, partial(_blocking_fetch_worksheet_rows, spreadsheet, DISCIPLESHIP_SHEET_TAB)
-                ),
-                timeout=15,
-            )
-        except asyncio.TimeoutError:
-            print(f"🛑 Timeout loading '{DISCIPLESHIP_SHEET_TAB}' tab")
-            return
+            await _run_one_polling_pass(bot)
+            record_task_success(TASK_NAME)
         except Exception as error:
-            print(f"[Error in sheet '{DISCIPLESHIP_SHEET_TAB}']: {error}")
-            await log_to_discord(f"❌ Failed to load discipleship form sheet: {error}")
-            return
-
-        for row_index, row in enumerate(all_rows):
-            if row_index < 1:
-                continue  # Skip header row
-
-            row += [""] * max(0, DISCIPLESHIP_NOTIFIED_STATUS_COLUMN - len(row))
-
-            respondent_name = row[1].strip()  # Column B
-            notified_status = row[DISCIPLESHIP_NOTIFIED_STATUS_COLUMN - 1].strip().lower()  # Column AA
-
-            if respondent_name and notified_status != "sent":
-                etl_channel = bot.get_channel(ETL_NOTIFICATIONS_CHANNEL_ID)
-                if etl_channel:
-                    await etl_channel.send(f"📖 Discipleship form has been filled out by **{respondent_name}**! ✨")
-                    await event_loop.run_in_executor(
-                        None,
-                        partial(
-                            _blocking_update_cell,
-                            worksheet,
-                            row_index + 1,
-                            DISCIPLESHIP_NOTIFIED_STATUS_COLUMN,
-                            "SENT",
-                        ),
-                    )
+            print(f"🛑 Unexpected error in discipleship form poll: {error}")
+            await log_to_discord(f"❌ Discipleship form poll failed unexpectedly: {error}")
 
     check_discipleship_form_for_new_entries.start()
+
+
+async def _run_one_polling_pass(bot):
+    event_loop = asyncio.get_running_loop()
+
+    try:
+        worksheet, all_rows = await asyncio.wait_for(
+            event_loop.run_in_executor(
+                None, partial(_blocking_fetch_worksheet_rows, spreadsheet, DISCIPLESHIP_SHEET_TAB)
+            ),
+            timeout=15,
+        )
+    except asyncio.TimeoutError:
+        print(f"🛑 Timeout loading '{DISCIPLESHIP_SHEET_TAB}' tab")
+        await log_to_discord(f"❌ Timed out loading discipleship form sheet.")
+        return
+    except Exception as error:
+        print(f"[Error in sheet '{DISCIPLESHIP_SHEET_TAB}']: {error}")
+        await log_to_discord(f"❌ Failed to load discipleship form sheet: {error}")
+        return
+
+    for row_index, row in enumerate(all_rows):
+        if row_index < 1:
+            continue  # Skip header row
+
+        row += [""] * max(0, DISCIPLESHIP_NOTIFIED_STATUS_COLUMN - len(row))
+
+        respondent_name = row[1].strip()  # Column B
+        notified_status = row[DISCIPLESHIP_NOTIFIED_STATUS_COLUMN - 1].strip().lower()  # Column AA
+
+        if respondent_name and notified_status != "sent":
+            etl_channel = bot.get_channel(ETL_NOTIFICATIONS_CHANNEL_ID)
+            if etl_channel:
+                await etl_channel.send(f"📖 Discipleship form has been filled out by **{respondent_name}**! ✨")
+                await event_loop.run_in_executor(
+                    None,
+                    partial(
+                        _blocking_update_cell,
+                        worksheet,
+                        row_index + 1,
+                        DISCIPLESHIP_NOTIFIED_STATUS_COLUMN,
+                        "SENT",
+                    ),
+                )

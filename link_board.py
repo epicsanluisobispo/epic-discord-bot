@@ -23,6 +23,9 @@ from config import (
 )
 from logging_utils import log_to_discord
 from media_sheet import spreadsheet
+from task_health import record_task_success
+
+TASK_NAME = "link_board"
 
 logger = logging.getLogger(__name__)
 
@@ -141,14 +144,20 @@ async def _get_or_create_board_message(bot):
 def setup_link_board_task(bot):
     @tasks.loop(seconds=SHEET_POLL_INTERVAL_SECONDS)
     async def check_link_board_for_updates():
-        board_message = await _get_or_create_board_message(bot)
-        if board_message is None:
-            return
-
-        embed = _build_link_board_embed()
+        # Top-level safety net: an unhandled exception here would otherwise
+        # silently kill this loop forever. Catching it keeps the task alive
+        # to try again next cycle, and surfaces the failure instead of
+        # letting it disappear.
         try:
+            board_message = await _get_or_create_board_message(bot)
+            if board_message is None:
+                return
+
+            embed = _build_link_board_embed()
             await board_message.edit(embed=embed)
+            record_task_success(TASK_NAME)
         except Exception as error:
+            print(f"🛑 Unexpected error updating link board: {error}")
             await log_to_discord(f"❌ Failed to update link board message: {error}")
 
     check_link_board_for_updates.start()
