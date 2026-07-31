@@ -18,7 +18,8 @@ from config import (
     SHEET_POLL_INTERVAL_SECONDS,
 )
 from google_auth import get_sheets_client
-from logging_utils import log_to_discord
+from failure_throttle import log_failure_once, clear_failure
+from sheet_utils import update_cell_with_retry
 from task_health import record_task_success
 
 TASK_NAME = "discipleship_form"
@@ -32,10 +33,6 @@ def _blocking_fetch_worksheet_rows(sheet, tab_name):
     return worksheet, worksheet.get_all_values()
 
 
-def _blocking_update_cell(worksheet, row_number, column_number, value):
-    worksheet.update_cell(row_number, column_number, value)
-
-
 def setup_discipleship_form_task(bot):
     @tasks.loop(seconds=SHEET_POLL_INTERVAL_SECONDS)
     async def check_discipleship_form_for_new_entries():
@@ -46,15 +43,19 @@ def setup_discipleship_form_task(bot):
         try:
             await _run_one_polling_pass(bot)
             record_task_success(TASK_NAME)
+            clear_failure("discipleship_form:unexpected")
         except Exception as error:
             print(f"🛑 Unexpected error in discipleship form poll: {error}")
-            await log_to_discord(f"❌ Discipleship form poll failed unexpectedly: {error}")
+            await log_failure_once(
+                "discipleship_form:unexpected", f"❌ Discipleship form poll failed unexpectedly: {error}"
+            )
 
     check_discipleship_form_for_new_entries.start()
 
 
 async def _run_one_polling_pass(bot):
     event_loop = asyncio.get_running_loop()
+    tab_load_failure_key = "discipleship_form:tab_load"
 
     try:
         worksheet, all_rows = await asyncio.wait_for(
@@ -63,13 +64,16 @@ async def _run_one_polling_pass(bot):
             ),
             timeout=15,
         )
+        clear_failure(tab_load_failure_key)
     except asyncio.TimeoutError:
         print(f"🛑 Timeout loading '{DISCIPLESHIP_SHEET_TAB}' tab")
-        await log_to_discord(f"❌ Timed out loading discipleship form sheet.")
+        await log_failure_once(tab_load_failure_key, "❌ Timed out loading discipleship form sheet.")
         return
     except Exception as error:
         print(f"[Error in sheet '{DISCIPLESHIP_SHEET_TAB}']: {error}")
-        await log_to_discord(f"❌ Failed to load discipleship form sheet: {error}")
+        await log_failure_once(
+            tab_load_failure_key, f"❌ Failed to load discipleship form sheet: {error}"
+        )
         return
 
     for row_index, row in enumerate(all_rows):
@@ -85,13 +89,10 @@ async def _run_one_polling_pass(bot):
             etl_channel = bot.get_channel(ETL_NOTIFICATIONS_CHANNEL_ID)
             if etl_channel:
                 await etl_channel.send(f"📖 Discipleship form has been filled out by **{respondent_name}**! ✨")
-                await event_loop.run_in_executor(
-                    None,
-                    partial(
-                        _blocking_update_cell,
-                        worksheet,
-                        row_index + 1,
-                        DISCIPLESHIP_NOTIFIED_STATUS_COLUMN,
-                        "SENT",
-                    ),
+                await update_cell_with_retry(
+                    worksheet,
+                    row_index + 1,
+                    DISCIPLESHIP_NOTIFIED_STATUS_COLUMN,
+                    "SENT",
+                    context_label=f"discipleship notified, row {row_index + 1}",
                 )

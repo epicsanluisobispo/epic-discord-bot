@@ -26,6 +26,8 @@ from config import (
 )
 from google_auth import get_sheets_client
 from logging_utils import log_to_discord
+from failure_throttle import log_failure_once, clear_failure
+from sheet_utils import update_cell_with_retry
 from task_health import record_task_success
 
 TASK_NAME = "media_sheet"
@@ -39,10 +41,6 @@ def _blocking_fetch_worksheet_rows(sheet, tab_name):
     return worksheet, worksheet.get_all_values()
 
 
-def _blocking_update_cell(worksheet, row_number, column_number, value):
-    worksheet.update_cell(row_number, column_number, value)
-
-
 def setup_media_sheet_task(bot):
     @tasks.loop(seconds=SHEET_POLL_INTERVAL_SECONDS)
     async def check_media_sheet_for_updates():
@@ -54,9 +52,12 @@ def setup_media_sheet_task(bot):
         try:
             await _run_one_polling_pass(bot)
             record_task_success(TASK_NAME)
+            clear_failure("media_sheet:unexpected")
         except Exception as error:
             print(f"🛑 Unexpected error in media sheet poll: {error}")
-            await log_to_discord(f"❌ Media sheet poll failed unexpectedly: {error}")
+            await log_failure_once(
+                "media_sheet:unexpected", f"❌ Media sheet poll failed unexpectedly: {error}"
+            )
 
     check_media_sheet_for_updates.start()
 
@@ -65,6 +66,7 @@ async def _run_one_polling_pass(bot):
     event_loop = asyncio.get_running_loop()
 
     for tab_name in MEDIA_SHEET_QUARTER_TABS:
+        tab_load_failure_key = f"media_sheet:tab_load:{tab_name}"
         try:
             worksheet, all_rows = await asyncio.wait_for(
                 event_loop.run_in_executor(
@@ -72,13 +74,16 @@ async def _run_one_polling_pass(bot):
                 ),
                 timeout=15,
             )
+            clear_failure(tab_load_failure_key)
         except asyncio.TimeoutError:
             print(f"🛑 Timeout loading '{tab_name}' tab")
-            await log_to_discord(f"❌ Timed out loading media sheet tab '{tab_name}'.")
+            await log_failure_once(tab_load_failure_key, f"❌ Timed out loading media sheet tab '{tab_name}'.")
             continue
         except Exception as error:
             print(f"[Error in sheet '{tab_name}']: {error}")
-            await log_to_discord(f"❌ Failed to load media sheet tab '{tab_name}': {error}")
+            await log_failure_once(
+                tab_load_failure_key, f"❌ Failed to load media sheet tab '{tab_name}': {error}"
+            )
             continue
 
         for row_index, row in enumerate(all_rows):
@@ -107,15 +112,12 @@ async def _run_one_polling_pass(bot):
                         f"📢 **{requester_name}** has added {event_name} to the **media live sheet**. "
                         f"Waiting to be reviewed!"
                     )
-                    await event_loop.run_in_executor(
-                        None,
-                        partial(
-                            _blocking_update_cell,
-                            worksheet,
-                            row_index + 1,
-                            MEDIA_ETL_NOTIFIED_STATUS_COLUMN,
-                            "SENT",
-                        ),
+                    await update_cell_with_retry(
+                        worksheet,
+                        row_index + 1,
+                        MEDIA_ETL_NOTIFIED_STATUS_COLUMN,
+                        "SENT",
+                        context_label=f"media etl-notified, row {row_index + 1}",
                     )
                 continue
 
@@ -139,15 +141,12 @@ async def _run_one_polling_pass(bot):
                             f"⏰ Reminder: **{requester_name}**'s media request for {event_name} has been "
                             f"waiting for ETL approval for {days_pending} days. Please review!"
                         )
-                        await event_loop.run_in_executor(
-                            None,
-                            partial(
-                                _blocking_update_cell,
-                                worksheet,
-                                row_index + 1,
-                                MEDIA_REMINDER_SENT_STATUS_COLUMN,
-                                "SENT",
-                            ),
+                        await update_cell_with_retry(
+                            worksheet,
+                            row_index + 1,
+                            MEDIA_REMINDER_SENT_STATUS_COLUMN,
+                            "SENT",
+                            context_label=f"media reminder-sent, row {row_index + 1}",
                         )
 
             # Request approved by ETLs -> notify the relevant team(s) once.
@@ -190,13 +189,10 @@ async def _run_one_polling_pass(bot):
                         notified_a_team = True
 
                 if notified_a_team:
-                    await event_loop.run_in_executor(
-                        None,
-                        partial(
-                            _blocking_update_cell,
-                            worksheet,
-                            row_index + 1,
-                            MEDIA_TEAM_NOTIFIED_STATUS_COLUMN,
-                            "SENT",
-                        ),
+                    await update_cell_with_retry(
+                        worksheet,
+                        row_index + 1,
+                        MEDIA_TEAM_NOTIFIED_STATUS_COLUMN,
+                        "SENT",
+                        context_label=f"media team-notified, row {row_index + 1}",
                     )

@@ -22,6 +22,7 @@ from config import (
     SHEET_POLL_INTERVAL_SECONDS,
 )
 from logging_utils import log_to_discord
+from failure_throttle import log_failure_once, clear_failure
 from media_sheet import spreadsheet
 from task_health import record_task_success
 
@@ -118,24 +119,33 @@ async def _get_or_create_board_message(bot):
 
     channel = bot.get_channel(LINK_BOARD_CHANNEL_ID)
     if channel is None:
-        await log_to_discord(f"❌ Link board channel {LINK_BOARD_CHANNEL_ID} not found.")
+        await log_failure_once(
+            "link_board:channel_missing", f"❌ Link board channel {LINK_BOARD_CHANNEL_ID} not found."
+        )
         return None
 
     try:
         async for message in channel.history(limit=50):
             if message.author == bot.user and message.embeds:
                 _cached_board_message = message
+                clear_failure("link_board:history_read")
                 return _cached_board_message
+        clear_failure("link_board:history_read")
     except Exception as error:
-        await log_to_discord(f"❌ Failed to read message history in link board channel: {error}")
+        await log_failure_once(
+            "link_board:history_read", f"❌ Failed to read message history in link board channel: {error}"
+        )
 
     # No existing board message found — create a new one.
     try:
         placeholder_embed = discord.Embed(title="📎 Active Epic SLO Links", description="Loading...")
         new_message = await channel.send(embed=placeholder_embed)
         _cached_board_message = new_message
+        clear_failure("link_board:create_message")
     except Exception as error:
-        await log_to_discord(f"❌ Failed to create link board message: {error}")
+        await log_failure_once(
+            "link_board:create_message", f"❌ Failed to create link board message: {error}"
+        )
         return None
 
     return _cached_board_message
@@ -156,8 +166,9 @@ def setup_link_board_task(bot):
             embed = _build_link_board_embed()
             await board_message.edit(embed=embed)
             record_task_success(TASK_NAME)
+            clear_failure("link_board:edit")
         except Exception as error:
             print(f"🛑 Unexpected error updating link board: {error}")
-            await log_to_discord(f"❌ Failed to update link board message: {error}")
+            await log_failure_once("link_board:edit", f"❌ Failed to update link board message: {error}")
 
     check_link_board_for_updates.start()

@@ -19,6 +19,7 @@ from event_sheet import setup_event_sheet_task
 from link_board import setup_link_board_task
 from discipleship_form import setup_discipleship_form_task
 from task_health import setup_task_health_monitor
+from startup_checks import run_startup_config_checks
 
 logging.basicConfig(level=logging.INFO)
 
@@ -38,16 +39,21 @@ _event_sheet_task_started = False
 _link_board_task_started = False
 _discipleship_form_task_started = False
 _task_health_monitor_started = False
+_startup_config_check_run = False
 
 
 @bot.event
 async def on_ready():
     global _media_sheet_task_started, _event_sheet_task_started, _link_board_task_started
-    global _discipleship_form_task_started, _task_health_monitor_started
+    global _discipleship_form_task_started, _task_health_monitor_started, _startup_config_check_run
 
     print(f"✅ Logged in as {bot.user}")
     await log_to_discord(f"🤖 Bot started as {bot.user}")
     await sweep_all_guild_members()
+
+    if not _startup_config_check_run:
+        await run_startup_config_checks(bot)
+        _startup_config_check_run = True
 
     if not _media_sheet_task_started:
         setup_media_sheet_task(bot)

@@ -36,6 +36,8 @@ from google_auth import (
     SPREADSHEET_AND_CALENDAR_SCOPES,
 )
 from logging_utils import log_to_discord
+from failure_throttle import log_failure_once, clear_failure
+from sheet_utils import update_cell_with_retry
 from task_health import record_task_success
 
 TASK_NAME = "event_sheet"
@@ -81,6 +83,7 @@ def create_google_calendar_event(summary, start_datetime, end_datetime):
 
 
 async def create_discord_scheduled_event(guild, name, start_datetime, end_datetime, location="TBA", description=""):
+    failure_key = f"event_sheet:create:{name}"
     try:
         scheduled_event = await guild.create_scheduled_event(
             name=name,
@@ -92,16 +95,18 @@ async def create_discord_scheduled_event(guild, name, start_datetime, end_dateti
             privacy_level=ScheduledEventPrivacyLevel.guild_only,
         )
         print(f"✅ Discord event created: {name}")
+        clear_failure(failure_key)
         return scheduled_event.id
     except Exception as error:
         print(f"❌ Failed to create Discord event '{name}': {error}")
-        await log_to_discord(f"❌ Failed to create Discord event **{name}**: {error}")
+        await log_failure_once(failure_key, f"❌ Failed to create Discord event **{name}**: {error}")
         return None
 
 
 async def update_discord_scheduled_event(
     guild, discord_event_id, name, start_datetime, end_datetime, location="TBA", description=""
 ):
+    failure_key = f"event_sheet:update:{discord_event_id}"
     try:
         scheduled_event = await guild.fetch_scheduled_event(discord_event_id)
         await scheduled_event.edit(
@@ -112,19 +117,24 @@ async def update_discord_scheduled_event(
             description=description,
         )
         print(f"🔄 Discord event updated: {name}")
+        clear_failure(failure_key)
     except Exception as error:
         print(f"❌ Failed to update Discord event '{name}': {error}")
-        await log_to_discord(f"❌ Failed to update Discord event **{name}**: {error}")
+        await log_failure_once(failure_key, f"❌ Failed to update Discord event **{name}**: {error}")
 
 
 async def delete_discord_scheduled_event(guild, discord_event_id):
+    failure_key = f"event_sheet:delete:{discord_event_id}"
     try:
         scheduled_event = await guild.fetch_scheduled_event(discord_event_id)
         await scheduled_event.delete()
         print(f"🗑 Discord event deleted: {scheduled_event.name}")
+        clear_failure(failure_key)
     except Exception as error:
         print(f"❌ Failed to delete Discord event ID {discord_event_id}: {error}")
-        await log_to_discord(f"❌ Failed to delete Discord event ID {discord_event_id}: {error}")
+        await log_failure_once(
+            failure_key, f"❌ Failed to delete Discord event ID {discord_event_id}: {error}"
+        )
 
 
 def setup_event_sheet_task(bot):
@@ -136,9 +146,12 @@ def setup_event_sheet_task(bot):
         try:
             await _run_one_polling_pass(bot)
             record_task_success(TASK_NAME)
+            clear_failure("event_sheet:unexpected")
         except Exception as error:
             print(f"🛑 Unexpected error in event sheet poll: {error}")
-            await log_to_discord(f"❌ Event sheet poll failed unexpectedly: {error}")
+            await log_failure_once(
+                "event_sheet:unexpected", f"❌ Event sheet poll failed unexpectedly: {error}"
+            )
 
     check_event_request_sheet_for_updates.start()
 
@@ -147,12 +160,16 @@ async def _run_one_polling_pass(bot):
     now = datetime.now(PACIFIC_TIMEZONE)
 
     for tab_name in EVENT_REQUEST_SHEET_TABS:
+        tab_load_failure_key = f"event_sheet:tab_load:{tab_name}"
         try:
             worksheet = await asyncio.to_thread(spreadsheet.worksheet, tab_name)
             all_rows = await asyncio.to_thread(worksheet.get_all_values)
+            clear_failure(tab_load_failure_key)
         except Exception as error:
             print(f"[Error loading tab '{tab_name}']: {error}")
-            await log_to_discord(f"❌ Failed to load event sheet tab '{tab_name}': {error}")
+            await log_failure_once(
+                tab_load_failure_key, f"❌ Failed to load event sheet tab '{tab_name}': {error}"
+            )
             continue
 
         for row_index, row in enumerate(all_rows):
@@ -192,8 +209,12 @@ async def _run_one_polling_pass(bot):
                         f"📌 **{requester_name}** submitted an **event request** for **{team_name}** team. "
                         f"Please review!"
                     )
-                    await asyncio.to_thread(
-                        worksheet.update_cell, row_index + 1, EVENT_ETL_NOTIFIED_STATUS_COLUMN, "SENT"
+                    await update_cell_with_retry(
+                        worksheet,
+                        row_index + 1,
+                        EVENT_ETL_NOTIFIED_STATUS_COLUMN,
+                        "SENT",
+                        context_label=f"event etl-notified, row {row_index + 1}",
                     )
 
             all_etls_approved = (
@@ -219,8 +240,12 @@ async def _run_one_polling_pass(bot):
                             f"⏰ Reminder: **{requester_name}**'s event request for **{team_name}** team has been "
                             f"waiting for full ETL approval for {days_pending} days. Please review!"
                         )
-                        await asyncio.to_thread(
-                            worksheet.update_cell, row_index + 1, EVENT_REMINDER_SENT_STATUS_COLUMN, "SENT"
+                        await update_cell_with_retry(
+                            worksheet,
+                            row_index + 1,
+                            EVENT_REMINDER_SENT_STATUS_COLUMN,
+                            "SENT",
+                            context_label=f"event reminder-sent, row {row_index + 1}",
                         )
 
             # All three ETLs approved -> notify team + create calendar/Discord events.
@@ -233,8 +258,12 @@ async def _run_one_polling_pass(bot):
                         await team_channel.send(
                             f"✅ Your event request for **{event_description}** has been approved by the ETLs!"
                         )
-                        await asyncio.to_thread(
-                            worksheet.update_cell, row_index + 1, EVENT_APPROVAL_NOTIFIED_STATUS_COLUMN, "SENT"
+                        await update_cell_with_retry(
+                            worksheet,
+                            row_index + 1,
+                            EVENT_APPROVAL_NOTIFIED_STATUS_COLUMN,
+                            "SENT",
+                            context_label=f"event approval-notified, row {row_index + 1}",
                         )
 
                     if event_date_str and event_start_time_str and event_end_time_str:
@@ -242,6 +271,7 @@ async def _run_one_polling_pass(bot):
                         event_end_datetime = parse_event_datetime(event_date_str, event_end_time_str)
 
                         if event_start_datetime and event_end_datetime:
+                            calendar_failure_key = f"event_sheet:calendar:{event_description}"
                             try:
                                 await asyncio.to_thread(
                                     create_google_calendar_event,
@@ -249,10 +279,12 @@ async def _run_one_polling_pass(bot):
                                     event_start_datetime,
                                     event_end_datetime,
                                 )
+                                clear_failure(calendar_failure_key)
                             except Exception as calendar_error:
                                 print(f"🛑 Calendar event failed: {calendar_error}")
-                                await log_to_discord(
-                                    f"❌ Failed to create calendar event **{event_description}**: {calendar_error}"
+                                await log_failure_once(
+                                    calendar_failure_key,
+                                    f"❌ Failed to create calendar event **{event_description}**: {calendar_error}",
                                 )
 
                             if is_recurring_event:
@@ -269,8 +301,12 @@ async def _run_one_polling_pass(bot):
                                 if discord_scheduled_event_id:
                                     if event_end_datetime < now:
                                         await delete_discord_scheduled_event(guild, discord_scheduled_event_id)
-                                        await asyncio.to_thread(
-                                            worksheet.update_cell, row_index + 1, EVENT_DISCORD_EVENT_ID_COLUMN, ""
+                                        await update_cell_with_retry(
+                                            worksheet,
+                                            row_index + 1,
+                                            EVENT_DISCORD_EVENT_ID_COLUMN,
+                                            "",
+                                            context_label=f"event discord-id clear, row {row_index + 1}",
                                         )
                                     elif event_is_within_creation_window:
                                         await update_discord_scheduled_event(
@@ -293,11 +329,12 @@ async def _run_one_polling_pass(bot):
                                             description=event_description,
                                         )
                                         if new_discord_event_id:
-                                            await asyncio.to_thread(
-                                                worksheet.update_cell,
+                                            await update_cell_with_retry(
+                                                worksheet,
                                                 row_index + 1,
                                                 EVENT_DISCORD_EVENT_ID_COLUMN,
                                                 new_discord_event_id,
+                                                context_label=f"event discord-id save, row {row_index + 1}",
                                             )
                                     else:
                                         print(
