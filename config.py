@@ -140,9 +140,10 @@ ROLE_GRANT_RULES = [
     {"grants_role_named": "5th+ year approved", "granted_if_member_has_any_of_these_role_groups": [["approved", "5th+ year"]]},
     {"grants_role_named": "alumni approved", "granted_if_member_has_any_of_these_role_groups": [["approved", "alumni"]]},
 
-    # Anyone currently approved for any class year (1st through 5th+) gets
-    # "Active Epic Member" — except alumni, who are excluded even if they
-    # still happen to hold a year-approved role from before graduating.
+    # Anyone currently approved for any class year (1st through 5th+), or
+    # holding the "staff" role, gets "Active Epic Member" — except alumni,
+    # who are excluded even if they still happen to hold a year-approved
+    # or staff role from before graduating.
     {
         "grants_role_named": "Active Epic Member",
         "granted_if_member_has_any_of_these_role_groups": [
@@ -151,6 +152,7 @@ ROLE_GRANT_RULES = [
             ["3rd year approved"],
             ["4th year approved"],
             ["5th+ year approved"],
+            ["staff"],
         ],
         "excluded_if_member_has_any_of_these_roles": ["alumni approved"],
     },
