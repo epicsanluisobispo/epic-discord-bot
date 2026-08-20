@@ -13,7 +13,7 @@ from datetime import datetime
 
 import pytz
 from dateutil import parser
-from discord.enums import ScheduledEventEntityType, ScheduledEventPrivacyLevel
+from discord import EntityType, PrivacyLevel
 from discord.ext import tasks
 
 from config import (
@@ -91,9 +91,9 @@ async def create_discord_scheduled_event(guild, name, start_datetime, end_dateti
             description=description,
             start_time=start_datetime,
             end_time=end_datetime,
-            entity_type=ScheduledEventEntityType.external,
+            entity_type=EntityType.external,
             location=location,
-            privacy_level=ScheduledEventPrivacyLevel.guild_only,
+            privacy_level=PrivacyLevel.guild_only,
         )
         print(f"✅ Discord event created: {name}")
         clear_failure(failure_key)
