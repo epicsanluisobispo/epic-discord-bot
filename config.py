@@ -58,8 +58,8 @@ MEDIA_SHEET_QUARTER_TABS = ["Fall Semester", "Spring Semester"]
 
 # 1-indexed spreadsheet columns used as "have we already notified for this
 # row?" flags, so the bot doesn't send duplicate Discord messages.
-MEDIA_ETL_NOTIFIED_STATUS_COLUMN = 24   # Column X
-MEDIA_TEAM_NOTIFIED_STATUS_COLUMN = 25  # Column Y
+MEDIA_ETL_NOTIFIED_STATUS_COLUMN = 26   # Column X # temp set to Z and AA, need to change back
+MEDIA_TEAM_NOTIFIED_STATUS_COLUMN = 27  # Column Y
 
 EVENT_REQUEST_SHEET_URL = "https://docs.google.com/spreadsheets/d/1qBHkcxutxlkn4ZQfx-knbuLwsnrXyYorwjq7OFUQ-M4/edit?usp=sharing"
 EVENT_REQUEST_SHEET_TABS = ["Form Responses 1"]
