@@ -6,6 +6,7 @@ used by hosting/monitoring to confirm the bot process is alive.
 embed — see link_board.py.)
 """
 
+import os
 from threading import Thread
 
 from flask import Flask
@@ -19,7 +20,11 @@ def home():
 
 
 def run_flask_app():
-    app.run(host="0.0.0.0", port=8080)
+    # Railway (and most hosts) assign a port dynamically via the PORT env
+    # var and route traffic to whatever the app actually binds to; 8080 is
+    # just a local-dev fallback.
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
 
 
 def start_flask_in_background_thread():
