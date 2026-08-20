@@ -21,7 +21,7 @@ LOG_CHANNEL_ID = 1388219823384690838
 ETL_NOTIFICATIONS_CHANNEL_ID = 1395968665287135262
 
 # Media-request specific channel.
-MEDIA_TEAM_CHANNEL_ID = 1388259539714969830
+MEDIA_TEAM_CHANNEL_ID = 1517743044731076698
 
 # Where the live-updating "active links" embed is posted and kept edited
 # in place (replaces the old Google Sites / Flask "/media-links" page).
@@ -30,21 +30,21 @@ LINK_BOARD_CHANNEL_ID = 1532078440021491843
 # "Large group slides" channel. This is the same channel used both when
 # announcing an approved media request that needs a slide, and as the
 # "large group" team channel for approved event requests.
-LARGE_GROUP_SLIDES_CHANNEL_ID = 1388258914629451917
+LARGE_GROUP_SLIDES_CHANNEL_ID = 1517742824336916490
 
 # Per-team channels used to announce approved event requests.
 EVENT_TEAM_CHANNEL_MAP = {
     "large group": LARGE_GROUP_SLIDES_CHANNEL_ID,
-    "outreach": 1388259127528259645,
-    "inreach": 1388259483335135232,
+    "outreach": 1517742881417330739,
+    "inreach": 1517742931140808796,
     "media": MEDIA_TEAM_CHANNEL_ID,
-    "mens isi": 1388259626906030252,
-    "womens isi": 1388259678391242864,
-    "4th year cg": 1388259730958450889,
-    "worship": 1388259786990030928,
-    "boys t1": 1388259868959441047,
-    "girls t1": 1388259923078549504,
-    "retreats": 1388259981001887744,
+    "mens isi": 1517743670575763557, #isi merged into one channel
+    "womens isi": 1517743670575763557,
+    "4th year cg": 1517743743342608514,
+    "worship": 1517743293348450324,
+    "boys t1": 1517743609896763512, #t1 merged into one channel
+    "girls t1": 1517743609896763512,
+    "retreats": 1517742971435614288,
     "prayer": 1517743338281767013,
     "staff": 1517743843041218660,
 }
@@ -53,27 +53,31 @@ EVENT_TEAM_CHANNEL_MAP = {
 # Google Sheets configuration
 # ----------------------------------------------------------------------
 
-MEDIA_SHEET_URL = "https://docs.google.com/spreadsheets/d/1mTtVfZdIV62hWSGT4zNYkQRlzjM3DynILR1y3O1wPEs/edit?usp=sharing"
-MEDIA_SHEET_QUARTER_TABS = ["Fall Quarter", "Winter Quarter", "Spring Quarter"]
+MEDIA_SHEET_URL = "https://docs.google.com/spreadsheets/d/1w3zSbQyQwcFIGgE60nF5j4jSB--TZfz-M8mx3BZ8p4E/edit?usp=sharing"
+MEDIA_SHEET_QUARTER_TABS = ["Fall Semester", "Spring Semester"]
 
 # 1-indexed spreadsheet columns used as "have we already notified for this
 # row?" flags, so the bot doesn't send duplicate Discord messages.
 MEDIA_ETL_NOTIFIED_STATUS_COLUMN = 24   # Column X
 MEDIA_TEAM_NOTIFIED_STATUS_COLUMN = 25  # Column Y
 
-EVENT_REQUEST_SHEET_URL = "https://docs.google.com/spreadsheets/d/1ynvQRNEG26NKE8zYZFhjaLL0RiBmA7hWD-np3EwqbeQ/edit?usp=sharing"
-EVENT_REQUEST_SHEET_TABS = ["Use this one"]
+EVENT_REQUEST_SHEET_URL = "https://docs.google.com/spreadsheets/d/1qBHkcxutxlkn4ZQfx-knbuLwsnrXyYorwjq7OFUQ-M4/edit?usp=sharing"
+EVENT_REQUEST_SHEET_TABS = ["Form Responses 1"]
 
-EVENT_ETL_NOTIFIED_STATUS_COLUMN = 27       # Column AA
-EVENT_APPROVAL_NOTIFIED_STATUS_COLUMN = 28  # Column AB
-EVENT_DISCORD_EVENT_ID_COLUMN = 29          # Column AC
+# Single ETL approval column (previously three separate approver columns
+# at X/Y/Z). The status-tracking columns below shift up to start right
+# after it instead of starting at AA.
+EVENT_APPROVED_STATUS_COLUMN = 24           # Column X
+EVENT_ETL_NOTIFIED_STATUS_COLUMN = 25       # Column Y
+EVENT_APPROVAL_NOTIFIED_STATUS_COLUMN = 26  # Column Z
+EVENT_DISCORD_EVENT_ID_COLUMN = 27          # Column AA
 
 # Google Calendar that approved events get added to.
 EVENT_CALENDAR_ID = "epicsanluisobispo@gmail.com"
 
-DISCIPLESHIP_SHEET_URL = "https://docs.google.com/spreadsheets/d/1FCRT3zspJur8KMaBsw6xhflZjEAaQyMSvlvEW0w4pgg/edit"
-DISCIPLESHIP_SHEET_TAB = "New form responses"
-DISCIPLESHIP_NOTIFIED_STATUS_COLUMN = 27  # Column AA
+DISCIPLESHIP_SHEET_URL = "https://docs.google.com/spreadsheets/d/1Z2nUHkSrR67NiOgUbCwKpLbZguBLFg3pAeIaMmR12WM/edit?usp=sharing"
+DISCIPLESHIP_SHEET_TAB = "Form Responses 1"
+DISCIPLESHIP_NOTIFIED_STATUS_COLUMN = 30  # Column AD
 
 # ----------------------------------------------------------------------
 # Stale-request reminders
@@ -91,7 +95,7 @@ MEDIA_REMINDER_SENT_STATUS_COLUMN = 26  # Column Z
 # submitted. If that's not what column A actually contains, this
 # threshold logic will need a different column.
 EVENT_SUBMITTED_TIMESTAMP_COLUMN = 1    # Column A
-EVENT_REMINDER_SENT_STATUS_COLUMN = 30  # Column AD
+EVENT_REMINDER_SENT_STATUS_COLUMN = 28  # Column AB
 
 # ----------------------------------------------------------------------
 # Background task health monitoring

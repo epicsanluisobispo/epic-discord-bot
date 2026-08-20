@@ -1,7 +1,7 @@
 """
 Background task that polls the event-request Google Sheet and:
  - notifies ETLs of new event requests
- - once all three ETLs approve, notifies the relevant team channel and
+ - once the ETLs approve, notifies the relevant team channel and
    creates a Google Calendar event
  - for one-time events (not recurring), also creates/updates/deletes a
    matching Discord scheduled event
@@ -19,6 +19,7 @@ from discord.ext import tasks
 from config import (
     EVENT_REQUEST_SHEET_URL,
     EVENT_REQUEST_SHEET_TABS,
+    EVENT_APPROVED_STATUS_COLUMN,
     EVENT_ETL_NOTIFIED_STATUS_COLUMN,
     EVENT_APPROVAL_NOTIFIED_STATUS_COLUMN,
     EVENT_DISCORD_EVENT_ID_COLUMN,
@@ -187,9 +188,7 @@ async def _run_one_polling_pass(bot):
             event_start_time_str = row[13].strip()             # Column N
             event_end_time_str = row[14].strip()               # Column O
             event_location = row[15].strip()                   # Column P
-            josh_approval_status = row[23].strip().lower()     # Column X
-            nikki_approval_status = row[24].strip().lower()    # Column Y
-            ellie_approval_status = row[25].strip().lower()    # Column Z
+            event_approved_status = row[EVENT_APPROVED_STATUS_COLUMN - 1].strip().lower()  # Column X
             etl_notified_status = row[EVENT_ETL_NOTIFIED_STATUS_COLUMN - 1].strip().lower()
             approval_notified_status = row[EVENT_APPROVAL_NOTIFIED_STATUS_COLUMN - 1].strip().lower()
             discord_scheduled_event_id = row[EVENT_DISCORD_EVENT_ID_COLUMN - 1].strip()
@@ -217,14 +216,12 @@ async def _run_one_polling_pass(bot):
                         context_label=f"event etl-notified, row {row_index + 1}",
                     )
 
-            all_etls_approved = (
-                josh_approval_status == nikki_approval_status == ellie_approval_status == "approved"
-            )
+            is_event_approved = event_approved_status == "approved"
 
-            # Still awaiting full ETL approval after too long -> remind once.
+            # Still awaiting ETL approval after too long -> remind once.
             if (
                 requester_name
-                and not all_etls_approved
+                and not is_event_approved
                 and reminder_sent_status != "sent"
                 and submitted_timestamp_str
             ):
@@ -238,7 +235,7 @@ async def _run_one_polling_pass(bot):
                     if etl_channel:
                         await etl_channel.send(
                             f"⏰ Reminder: **{requester_name}**'s event request for **{team_name}** team has been "
-                            f"waiting for full ETL approval for {days_pending} days. Please review!"
+                            f"waiting for ETL approval for {days_pending} days. Please review!"
                         )
                         await update_cell_with_retry(
                             worksheet,
@@ -248,8 +245,8 @@ async def _run_one_polling_pass(bot):
                             context_label=f"event reminder-sent, row {row_index + 1}",
                         )
 
-            # All three ETLs approved -> notify team + create calendar/Discord events.
-            if all_etls_approved and approval_notified_status != "sent":
+            # ETL approved -> notify team + create calendar/Discord events.
+            if is_event_approved and approval_notified_status != "sent":
                 event_description = recurring_event_name or one_time_event_name or "a request"
 
                 if team_name in EVENT_TEAM_CHANNEL_MAP:

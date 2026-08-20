@@ -115,7 +115,7 @@ async def build_pending_report():
     lines.extend(pending_media_lines if pending_media_lines else ["• None 🎉"])
 
     lines.append("")
-    lines.append("**Event requests awaiting full ETL approval:**")
+    lines.append("**Event requests awaiting ETL approval:**")
 
     pending_event_lines = []
     for tab_name in EVENT_REQUEST_SHEET_TABS:
@@ -129,18 +129,16 @@ async def build_pending_report():
             if row_index < 1:
                 continue  # Skip header row
 
-            row += [""] * 26
+            row += [""] * 24
             requester_name = row[1].strip()               # Column B
             team_name = row[2].strip()                     # Column C
             recurring_event_name = row[6].strip()           # Column G
             one_time_event_name = row[11].strip()           # Column L
-            josh_approval_status = row[23].strip().lower()  # Column X
-            nikki_approval_status = row[24].strip().lower() # Column Y
-            ellie_approval_status = row[25].strip().lower() # Column Z
+            event_approved_status = row[23].strip().lower() # Column X
 
-            all_approved = josh_approval_status == nikki_approval_status == ellie_approval_status == "approved"
+            is_approved = event_approved_status == "approved"
 
-            if requester_name and not all_approved:
+            if requester_name and not is_approved:
                 description = recurring_event_name or one_time_event_name or "(unnamed)"
                 pending_event_lines.append(f"• **{requester_name}** — {description} ({team_name})")
 
