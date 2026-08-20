@@ -136,6 +136,21 @@ ROLE_GRANT_RULES = [
     {"grants_role_named": "5th+ year approved", "granted_if_member_has_any_of_these_role_groups": [["approved", "5th+ year"]]},
     {"grants_role_named": "alumni approved", "granted_if_member_has_any_of_these_role_groups": [["approved", "alumni"]]},
 
+    # Anyone currently approved for any class year (1st through 5th+) gets
+    # "Active Epic Member" — except alumni, who are excluded even if they
+    # still happen to hold a year-approved role from before graduating.
+    {
+        "grants_role_named": "Active Epic Member",
+        "granted_if_member_has_any_of_these_role_groups": [
+            ["1st year approved"],
+            ["2nd year approved"],
+            ["3rd year approved"],
+            ["4th year approved"],
+            ["5th+ year approved"],
+        ],
+        "excluded_if_member_has_any_of_these_roles": ["alumni approved"],
+    },
+
     # Community Group (CG) roles, each with multiple qualifying paths
     {"grants_role_named": "T1 men", "granted_if_member_has_any_of_these_role_groups": [["1st year approved", "male", "YES CG!!"]]},
     {"grants_role_named": "T1 women", "granted_if_member_has_any_of_these_role_groups": [["1st year approved", "female", "YES CG!!"]]},

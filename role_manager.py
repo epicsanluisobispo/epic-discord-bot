@@ -31,11 +31,22 @@ _last_role_update_timestamp_by_member_id = defaultdict(float)
 
 def _member_qualifies_for_rule(member_role_names, rule):
     """A member qualifies for a rule if they hold every role in at least
-    one of the rule's required role groups."""
-    return any(
+    one of the rule's required role groups, AND — if the rule specifies
+    `excluded_if_member_has_any_of_these_roles` — they don't hold any of
+    those excluded roles. The exclusion list is optional; rules without it
+    behave exactly as before."""
+    member_qualifies_via_groups = any(
         all(required_role_name in member_role_names for required_role_name in role_group)
         for role_group in rule["granted_if_member_has_any_of_these_role_groups"]
     )
+    if not member_qualifies_via_groups:
+        return False
+
+    excluded_role_names = rule.get("excluded_if_member_has_any_of_these_roles", [])
+    if any(excluded_role_name in member_role_names for excluded_role_name in excluded_role_names):
+        return False
+
+    return True
 
 
 async def apply_role_rules_to_member(member):
