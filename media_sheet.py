@@ -1,15 +1,12 @@
 """
 Background task that polls the media-request Google Sheet and posts Discord
-notifications when: (1) a new media request is submitted (notify ETLs),
-(2) a request is approved by the ETLs (notify the media/large-group teams),
-and (3) a request has been pending ETL approval for too long (reminder).
+notifications when: (1) a new media request is submitted (notify ETLs), and
+(2) a request is approved by the ETLs (notify the media/large-group teams).
 """
 
 import asyncio
-from datetime import datetime
 from functools import partial
 
-from dateutil import parser
 from discord.ext import tasks
 
 from config import (
@@ -17,15 +14,12 @@ from config import (
     MEDIA_SHEET_QUARTER_TABS,
     MEDIA_ETL_NOTIFIED_STATUS_COLUMN,
     MEDIA_TEAM_NOTIFIED_STATUS_COLUMN,
-    MEDIA_REMINDER_SENT_STATUS_COLUMN,
-    REQUEST_REMINDER_THRESHOLD_DAYS,
     ETL_NOTIFICATIONS_CHANNEL_ID,
     MEDIA_TEAM_CHANNEL_ID,
     LARGE_GROUP_SLIDES_CHANNEL_ID,
     SHEET_POLL_INTERVAL_SECONDS,
 )
 from google_auth import get_sheets_client
-from logging_utils import log_to_discord
 from failure_throttle import log_failure_once, clear_failure
 from sheet_utils import update_cell_with_retry
 from task_health import record_task_success
@@ -90,19 +84,16 @@ async def _run_one_polling_pass(bot):
             if row_index < 2:
                 continue  # Skip header rows
 
-            row += [""] * max(0, MEDIA_REMINDER_SENT_STATUS_COLUMN - len(row))
+            row += [""] * max(0, MEDIA_TEAM_NOTIFIED_STATUS_COLUMN - len(row))
 
             etl_approved = row[0].strip().lower()               # Column A
             requester_name = row[1].strip()                     # Column B
             event_name = row[3].strip()                         # Column D
-            form_open_date_str = row[9].strip()                 # Column J
-            form_close_date = row[10].strip()                   # Column K (unused downstream, kept for parity)
             wants_instagram_post = row[11].strip().lower()      # Column L
             wants_instagram_story = row[12].strip().lower()     # Column M
             wants_large_group_slide = row[17].strip().lower()   # Column R
             etl_notified_status = row[MEDIA_ETL_NOTIFIED_STATUS_COLUMN - 1].strip().lower()     # Column X
             team_notified_status = row[MEDIA_TEAM_NOTIFIED_STATUS_COLUMN - 1].strip().lower()   # Column Y
-            reminder_sent_status = row[MEDIA_REMINDER_SENT_STATUS_COLUMN - 1].strip().lower()   # Column Z
 
             # New request submitted -> notify ETLs once.
             if requester_name and event_name and etl_notified_status != "sent":
@@ -120,34 +111,6 @@ async def _run_one_polling_pass(bot):
                         context_label=f"media etl-notified, row {row_index + 1}",
                     )
                 continue
-
-            # Still awaiting ETL approval after too long -> remind once.
-            if (
-                requester_name
-                and event_name
-                and etl_approved != "yes"
-                and reminder_sent_status != "sent"
-                and form_open_date_str
-            ):
-                try:
-                    days_pending = (datetime.now().date() - parser.parse(form_open_date_str).date()).days
-                except Exception:
-                    days_pending = None
-
-                if days_pending is not None and days_pending >= REQUEST_REMINDER_THRESHOLD_DAYS:
-                    etl_channel = bot.get_channel(ETL_NOTIFICATIONS_CHANNEL_ID)
-                    if etl_channel:
-                        await etl_channel.send(
-                            f"⏰ Reminder: **{requester_name}**'s media request for {event_name} has been "
-                            f"waiting for ETL approval for {days_pending} days. Please review!"
-                        )
-                        await update_cell_with_retry(
-                            worksheet,
-                            row_index + 1,
-                            MEDIA_REMINDER_SENT_STATUS_COLUMN,
-                            "SENT",
-                            context_label=f"media reminder-sent, row {row_index + 1}",
-                        )
 
             # Request approved by ETLs -> notify the relevant team(s) once.
             if etl_approved == "yes" and team_notified_status != "sent":

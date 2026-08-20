@@ -5,14 +5,12 @@ Background task that polls the event-request Google Sheet and:
    creates a Google Calendar event
  - for one-time events (not recurring), also creates/updates/deletes a
    matching Discord scheduled event
- - reminds the ETL channel if a request has sat unapproved too long
 """
 
 import asyncio
 from datetime import datetime
 
 import pytz
-from dateutil import parser
 from discord import EntityType, PrivacyLevel
 from discord.ext import tasks
 
@@ -23,9 +21,6 @@ from config import (
     EVENT_ETL_NOTIFIED_STATUS_COLUMN,
     EVENT_APPROVAL_NOTIFIED_STATUS_COLUMN,
     EVENT_DISCORD_EVENT_ID_COLUMN,
-    EVENT_SUBMITTED_TIMESTAMP_COLUMN,
-    EVENT_REMINDER_SENT_STATUS_COLUMN,
-    REQUEST_REMINDER_THRESHOLD_DAYS,
     EVENT_TEAM_CHANNEL_MAP,
     EVENT_CALENDAR_ID,
     ETL_NOTIFICATIONS_CHANNEL_ID,
@@ -36,7 +31,6 @@ from google_auth import (
     get_calendar_service,
     SPREADSHEET_AND_CALENDAR_SCOPES,
 )
-from logging_utils import log_to_discord
 from failure_throttle import log_failure_once, clear_failure
 from sheet_utils import update_cell_with_retry
 from task_health import record_task_success
@@ -177,9 +171,8 @@ async def _run_one_polling_pass(bot):
             if row_index < 1:
                 continue  # Skip header row
 
-            row += [""] * max(0, EVENT_REMINDER_SENT_STATUS_COLUMN - len(row))
+            row += [""] * max(0, EVENT_DISCORD_EVENT_ID_COLUMN - len(row))
 
-            submitted_timestamp_str = row[EVENT_SUBMITTED_TIMESTAMP_COLUMN - 1].strip()  # Column A
             requester_name = row[1].strip()                  # Column B
             team_name = row[2].strip().lower()                # Column C
             recurring_event_name = row[6].strip()              # Column G
@@ -192,7 +185,6 @@ async def _run_one_polling_pass(bot):
             etl_notified_status = row[EVENT_ETL_NOTIFIED_STATUS_COLUMN - 1].strip().lower()
             approval_notified_status = row[EVENT_APPROVAL_NOTIFIED_STATUS_COLUMN - 1].strip().lower()
             discord_scheduled_event_id = row[EVENT_DISCORD_EVENT_ID_COLUMN - 1].strip()
-            reminder_sent_status = row[EVENT_REMINDER_SENT_STATUS_COLUMN - 1].strip().lower()
 
             # Requests marked recurring don't get a Discord scheduled event —
             # a single Discord event can't represent an ongoing weekly/
@@ -217,33 +209,6 @@ async def _run_one_polling_pass(bot):
                     )
 
             is_event_approved = event_approved_status == "approved"
-
-            # Still awaiting ETL approval after too long -> remind once.
-            if (
-                requester_name
-                and not is_event_approved
-                and reminder_sent_status != "sent"
-                and submitted_timestamp_str
-            ):
-                try:
-                    days_pending = (now.date() - parser.parse(submitted_timestamp_str).date()).days
-                except Exception:
-                    days_pending = None
-
-                if days_pending is not None and days_pending >= REQUEST_REMINDER_THRESHOLD_DAYS:
-                    etl_channel = bot.get_channel(ETL_NOTIFICATIONS_CHANNEL_ID)
-                    if etl_channel:
-                        await etl_channel.send(
-                            f"⏰ Reminder: **{requester_name}**'s event request for **{team_name}** team has been "
-                            f"waiting for ETL approval for {days_pending} days. Please review!"
-                        )
-                        await update_cell_with_retry(
-                            worksheet,
-                            row_index + 1,
-                            EVENT_REMINDER_SENT_STATUS_COLUMN,
-                            "SENT",
-                            context_label=f"event reminder-sent, row {row_index + 1}",
-                        )
 
             # ETL approved -> notify team + create calendar/Discord events.
             if is_event_approved and approval_notified_status != "sent":

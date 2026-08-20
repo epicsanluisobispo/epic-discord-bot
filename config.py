@@ -58,7 +58,7 @@ MEDIA_SHEET_QUARTER_TABS = ["Fall Semester", "Spring Semester"]
 
 # 1-indexed spreadsheet columns used as "have we already notified for this
 # row?" flags, so the bot doesn't send duplicate Discord messages.
-MEDIA_ETL_NOTIFIED_STATUS_COLUMN = 26   # Column X # temp set to Z and AA, need to change back
+MEDIA_ETL_NOTIFIED_STATUS_COLUMN = 26   # Column X #temp, need to fix
 MEDIA_TEAM_NOTIFIED_STATUS_COLUMN = 27  # Column Y
 
 EVENT_REQUEST_SHEET_URL = "https://docs.google.com/spreadsheets/d/1qBHkcxutxlkn4ZQfx-knbuLwsnrXyYorwjq7OFUQ-M4/edit?usp=sharing"
@@ -78,24 +78,6 @@ EVENT_CALENDAR_ID = "epicsanluisobispo@gmail.com"
 DISCIPLESHIP_SHEET_URL = "https://docs.google.com/spreadsheets/d/1Z2nUHkSrR67NiOgUbCwKpLbZguBLFg3pAeIaMmR12WM/edit?usp=sharing"
 DISCIPLESHIP_SHEET_TAB = "Form Responses 1"
 DISCIPLESHIP_NOTIFIED_STATUS_COLUMN = 30  # Column AD
-
-# ----------------------------------------------------------------------
-# Stale-request reminders
-# ----------------------------------------------------------------------
-# If a request has been sitting unapproved for this many days, the bot
-# nudges the ETL channel once (per request) as a reminder.
-REQUEST_REMINDER_THRESHOLD_DAYS = 14
-
-# Column J ("date form open") on the media sheet doubles as the
-# submission date for reminder purposes.
-MEDIA_REMINDER_SENT_STATUS_COLUMN = 26  # Column Z
-
-# ASSUMPTION, please confirm: column A on the event request sheet is a
-# Google Forms "Timestamp" column recording when the request was
-# submitted. If that's not what column A actually contains, this
-# threshold logic will need a different column.
-EVENT_SUBMITTED_TIMESTAMP_COLUMN = 1    # Column A
-EVENT_REMINDER_SENT_STATUS_COLUMN = 28  # Column AB
 
 # ----------------------------------------------------------------------
 # Background task health monitoring
