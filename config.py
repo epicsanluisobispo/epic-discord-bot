@@ -38,12 +38,12 @@ EVENT_TEAM_CHANNEL_MAP = {
     "outreach": 1517742881417330739,
     "inreach": 1517742931140808796,
     "media": MEDIA_TEAM_CHANNEL_ID,
-    "mens isi": 1517743670575763557, #isi merged into one channel
-    "womens isi": 1517743670575763557,
+    "mens isi": 1517743670575763557, 
+    "womens isi": 1540408157363380334,
     "4th year cg": 1517743743342608514,
     "worship": 1517743293348450324,
-    "boys t1": 1517743609896763512, #t1 merged into one channel
-    "girls t1": 1517743609896763512,
+    "boys t1": 1517743609896763512, 
+    "girls t1": 1540407907097640990,
     "retreats": 1517742971435614288,
     "prayer": 1517743338281767013,
     "staff": 1517743843041218660,
