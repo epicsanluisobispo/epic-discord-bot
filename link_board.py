@@ -9,6 +9,7 @@ one message to check instead of a growing feed.
 """
 
 import logging
+import traceback
 from datetime import datetime, time
 
 import discord
@@ -19,9 +20,9 @@ from discord.ext import tasks
 from config import (
     MEDIA_SHEET_QUARTER_TABS,
     LINK_BOARD_CHANNEL_ID,
+    ETL_NOTIFICATIONS_CHANNEL_ID,
     SHEET_POLL_INTERVAL_SECONDS,
 )
-from logging_utils import log_to_discord
 from failure_throttle import log_failure_once, clear_failure
 from media_sheet import spreadsheet
 from task_health import record_task_success
@@ -39,6 +40,13 @@ EMBED_DESCRIPTION_CHARACTER_LIMIT = 3900
 # Cached in memory once found/created, so we don't have to search pinned
 # messages on every single poll — only on the first run after a restart.
 _cached_board_message = None
+
+# Tracks which links were active as of the last poll, so newly-added links
+# can be announced separately from the persistent embed. Starts as None
+# (no baseline yet) rather than an empty set, specifically so the very
+# first poll after a bot restart doesn't treat every currently-active link
+# as "new" and spam an announcement for each one.
+_previously_active_links = None
 
 
 def _collect_active_links():
@@ -84,9 +92,7 @@ def _collect_active_links():
     return active_links
 
 
-def _build_link_board_embed():
-    active_links = _collect_active_links()
-
+def _build_link_board_embed(active_links):
     embed = discord.Embed(
         title="📎 Active Epic SLO Links",
         color=discord.Color.blue(),
@@ -151,6 +157,39 @@ async def _get_or_create_board_message(bot):
     return _cached_board_message
 
 
+async def _announce_newly_active_links(bot, active_links):
+    """Compares the current active links against what was active last
+    poll, and sends one message per link that just became active to the
+    ETL notifications channel. On the very first poll after a restart (no
+    baseline yet), it just records the current set silently instead of
+    announcing everything as "new"."""
+    global _previously_active_links
+
+    current_links = set(active_links)
+
+    if _previously_active_links is None:
+        _previously_active_links = current_links
+        return
+
+    newly_active_links = current_links - _previously_active_links
+    _previously_active_links = current_links
+
+    if not newly_active_links:
+        return
+
+    etl_notifications_channel = bot.get_channel(ETL_NOTIFICATIONS_CHANNEL_ID)
+    if etl_notifications_channel is None:
+        return
+
+    for display_name, event_link in newly_active_links:
+        try:
+            await etl_notifications_channel.send(f"🔗 New link posted: [{display_name}]({event_link})")
+        except Exception as error:
+            await log_failure_once(
+                "link_board:new_link_announce", f"❌ Failed to announce new link to ETL channel: {error}"
+            )
+
+
 def setup_link_board_task(bot):
     @tasks.loop(seconds=SHEET_POLL_INTERVAL_SECONDS)
     async def check_link_board_for_updates():
@@ -163,12 +202,15 @@ def setup_link_board_task(bot):
             if board_message is None:
                 return
 
-            embed = _build_link_board_embed()
+            active_links = _collect_active_links()
+            embed = _build_link_board_embed(active_links)
             await board_message.edit(embed=embed)
+            await _announce_newly_active_links(bot, active_links)
             record_task_success(TASK_NAME)
             clear_failure("link_board:edit")
         except Exception as error:
             print(f"🛑 Unexpected error updating link board: {error}")
+            print(traceback.format_exc())
             await log_failure_once("link_board:edit", f"❌ Failed to update link board message: {error}")
 
     check_link_board_for_updates.start()

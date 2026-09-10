@@ -1,22 +1,22 @@
 """
 Prevents a repeating failure (e.g. a sheet that's unreachable for an hour)
-from posting the same warning to the log channel on every single poll. A
-given failure `key` is only logged once; it won't log again until a
-matching `clear_failure(key)` call (on the next success) resets it.
+from posting the same warning to the error log channel on every single
+poll. A given failure `key` is only logged once; it won't log again until
+a matching `clear_failure(key)` call (on the next success) resets it.
 """
 
-from logging_utils import log_to_discord
+from logging_utils import log_error_to_discord
 
 _already_warned_keys = set()
 
 
 async def log_failure_once(key, message):
-    """Log `message` to the log channel only if we haven't already logged
-    a failure for this same `key` since it last recovered."""
+    """Log `message` to the error log channel only if we haven't already
+    logged a failure for this same `key` since it last recovered."""
     if key in _already_warned_keys:
         return
     _already_warned_keys.add(key)
-    await log_to_discord(message)
+    await log_error_to_discord(message)
 
 
 def clear_failure(key):

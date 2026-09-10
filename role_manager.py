@@ -15,7 +15,7 @@ from config import (
     SWEEP_DELAY_BETWEEN_MEMBERS_SECONDS,
     ROLE_UPDATE_COOLDOWN_SECONDS,
 )
-from logging_utils import log_to_discord
+from logging_utils import log_to_discord, log_error_to_discord
 from bot_instance import get_bot
 
 # True while a full-guild sweep is running. The on_member_update event
@@ -51,44 +51,71 @@ def _member_qualifies_for_rule(member_role_names, rule):
 
 async def apply_role_rules_to_member(member):
     """Grant/remove roles on a single member according to ROLE_GRANT_RULES.
-    Returns True if any role was actually added or removed."""
+    Returns True if any role was actually added or removed.
+
+    All roles that need adding are applied in a single add_roles(...) call,
+    and all roles that need removing in a single remove_roles(...) call —
+    at most 2 Discord API calls per member no matter how many individual
+    roles changed, instead of one call per role. This is both faster and
+    much friendlier to Discord's rate limits during a full guild sweep.
+    """
     guild = member.guild
     member_role_names = [role.name for role in member.roles]
-    did_change_a_role = False
+
+    roles_to_add = []
+    roles_to_remove = []
 
     for rule in ROLE_GRANT_RULES:
         role_to_grant_name = rule["grants_role_named"]
         role_to_grant = discord.utils.get(guild.roles, name=role_to_grant_name)
 
         if not role_to_grant:
-            await log_to_discord(f"❌ Role '{role_to_grant_name}' not found.")
+            await log_error_to_discord(f"❌ Role '{role_to_grant_name}' not found.")
             continue
 
         member_qualifies = _member_qualifies_for_rule(member_role_names, rule)
         member_already_has_role = role_to_grant in member.roles
 
         if member_qualifies and not member_already_has_role:
-            try:
-                await member.add_roles(role_to_grant)
-                await log_to_discord(f"➕ Gave **{role_to_grant.name}** to **{member.display_name}**")
-                did_change_a_role = True
-            except Exception as error:
-                await log_to_discord(f"❌ Could not add {role_to_grant.name} to {member.display_name}: {error}")
-
+            roles_to_add.append(role_to_grant)
         elif not member_qualifies and member_already_has_role:
-            try:
-                await member.remove_roles(role_to_grant)
-                await log_to_discord(f"➖ Removed **{role_to_grant.name}** from **{member.display_name}**")
-                did_change_a_role = True
-            except Exception as error:
-                await log_to_discord(f"❌ Could not remove {role_to_grant.name} from {member.display_name}: {error}")
+            roles_to_remove.append(role_to_grant)
+
+    did_change_a_role = False
+
+    if roles_to_add:
+        try:
+            await member.add_roles(*roles_to_add)
+            for role in roles_to_add:
+                await log_to_discord(f"➕ Gave **{role.name}** to **{member.display_name}**")
+            did_change_a_role = True
+        except Exception as error:
+            role_names_text = ", ".join(role.name for role in roles_to_add)
+            await log_error_to_discord(
+                f"❌ Could not add roles ({role_names_text}) to {member.display_name}: {error}"
+            )
+
+    if roles_to_remove:
+        try:
+            await member.remove_roles(*roles_to_remove)
+            for role in roles_to_remove:
+                await log_to_discord(f"➖ Removed **{role.name}** from **{member.display_name}**")
+            did_change_a_role = True
+        except Exception as error:
+            role_names_text = ", ".join(role.name for role in roles_to_remove)
+            await log_error_to_discord(
+                f"❌ Could not remove roles ({role_names_text}) from {member.display_name}: {error}"
+            )
 
     return did_change_a_role
 
 
 async def sweep_all_guild_members():
     """Re-check every member in the bot's (first) guild against
-    ROLE_GRANT_RULES."""
+    ROLE_GRANT_RULES. Only pauses after a member whose roles actually
+    changed (an API call was made) — members needing no changes are
+    checked back-to-back with no delay, since that check itself makes no
+    Discord API call and can't trigger a rate limit."""
     global is_sweep_in_progress
     is_sweep_in_progress = True
     members_changed_count = 0
@@ -96,7 +123,7 @@ async def sweep_all_guild_members():
 
     try:
         if not bot.guilds:
-            await log_to_discord("❌ Bot is not in any servers.")
+            await log_error_to_discord("❌ Bot is not in any servers.")
             return
 
         guild = bot.guilds[0]
@@ -107,7 +134,7 @@ async def sweep_all_guild_members():
             member_was_changed = await apply_role_rules_to_member(member)
             if member_was_changed:
                 members_changed_count += 1
-            await asyncio.sleep(SWEEP_DELAY_BETWEEN_MEMBERS_SECONDS)
+                await asyncio.sleep(SWEEP_DELAY_BETWEEN_MEMBERS_SECONDS)
     finally:
         is_sweep_in_progress = False
         await log_to_discord(f"✅ Sweep completed. {members_changed_count} members had roles changed.")

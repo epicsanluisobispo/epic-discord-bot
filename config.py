@@ -12,8 +12,14 @@ to update an ID or a rule instead of hunting through multiple files.
 # ----------------------------------------------------------------------
 
 # Where the bot posts its own activity/status logs (role changes, sweep
-# results, errors, etc.)
+# results, general startup/shutdown notices, etc.)
 LOG_CHANNEL_ID = 1388219823384690838
+
+# Dedicated channel for failures/errors specifically (sheet load failures,
+# Discord/Calendar API errors, missing roles, etc.) — kept separate from
+# LOG_CHANNEL_ID so that channel isn't diluted with genuine problems mixed
+# into routine activity notices.
+ERROR_LOG_CHANNEL_ID = 1541991775567224893
 
 # Where new ETL (Event/Team Leader) approval requests are posted, for both
 # the media sheet and the event request sheet. Both original source files
@@ -38,12 +44,12 @@ EVENT_TEAM_CHANNEL_MAP = {
     "outreach": 1517742881417330739,
     "inreach": 1517742931140808796,
     "media": MEDIA_TEAM_CHANNEL_ID,
-    "mens isi": 1517743670575763557, 
-    "womens isi": 1540408157363380334,
+    "mens isi": 1517743670575763557, #isi merged into one channel
+    "womens isi": 1517743670575763557,
     "4th year cg": 1517743743342608514,
     "worship": 1517743293348450324,
-    "boys t1": 1517743609896763512, 
-    "girls t1": 1540407907097640990,
+    "boys t1": 1517743609896763512, #t1 merged into one channel
+    "girls t1": 1517743609896763512,
     "retreats": 1517742971435614288,
     "prayer": 1517743338281767013,
     "staff": 1517743843041218660,
@@ -100,6 +106,30 @@ TASK_DISPLAY_NAMES = {
     "link_board": "Link board updater",
     "discipleship_form": "Discipleship form poller",
 }
+
+# ----------------------------------------------------------------------
+# Year migration (used by !migrate_roles)
+# ----------------------------------------------------------------------
+# Each (source_role, target_role) pair is processed in this EXACT order.
+# Both "4th year" and "5th+ year" graduate straight to "alumni" together,
+# and that step is processed BEFORE "3rd year" -> "4th year" — this
+# ordering is required: if 3rd-year promotions ran first, the newly-
+# promoted 4th-years would immediately get caught by the "4th year" ->
+# "alumni" step in that same run, graduating a cohort that should stay
+# another year. Processing top-down (highest existing year first) means a
+# member promoted by an earlier step in this run is never accidentally
+# re-caught and promoted again by a later step in the same run.
+YEAR_MIGRATION_CHAIN = [
+    ("5th+ year", "alumni"),
+    ("4th year", "alumni"),
+    ("3rd year", "4th year"),
+    ("2nd year", "3rd year"),
+    ("1st year", "2nd year"),
+]
+
+# How long (seconds) !migrate_roles waits for a typed "Yes" confirmation
+# before automatically cancelling, given how consequential this action is.
+MIGRATE_ROLES_CONFIRMATION_TIMEOUT_SECONDS = 30
 
 # ----------------------------------------------------------------------
 # Role eligibility rules
@@ -174,9 +204,13 @@ ROLE_GRANT_RULES = [
 # member, to avoid reacting to Discord's own multi-step role updates.
 ROLE_UPDATE_COOLDOWN_SECONDS = 3
 
-# Seconds to pause between members while sweeping the whole guild, to avoid
-# hitting Discord's rate limits.
-SWEEP_DELAY_BETWEEN_MEMBERS_SECONDS = 2
+# Seconds to pause after a member whose roles actually changed, while
+# sweeping the whole guild, to avoid hitting Discord's rate limits. Only
+# applied when a change actually happened (members needing no changes
+# aren't delayed at all), and role changes are batched into a single
+# add_roles + single remove_roles call per member — so this can be much
+# lower than a naive "pause after every member" approach would need.
+SWEEP_DELAY_BETWEEN_MEMBERS_SECONDS = 0.5
 
 # How often (seconds) the sheet-polling background tasks run.
 SHEET_POLL_INTERVAL_SECONDS = 60

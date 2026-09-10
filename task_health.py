@@ -17,7 +17,7 @@ from config import (
     TASK_HEALTH_CHECK_INTERVAL_SECONDS,
     TASK_STALE_THRESHOLD_SECONDS,
 )
-from logging_utils import log_to_discord
+from logging_utils import log_error_to_discord
 
 _last_successful_run_timestamp_by_task_name = {}
 _has_already_warned_stale_by_task_name = {}
@@ -54,7 +54,7 @@ def setup_task_health_monitor(bot):
 
             if seconds_since_last_success > TASK_STALE_THRESHOLD_SECONDS and not already_warned:
                 minutes_stale = int(seconds_since_last_success // 60)
-                await log_to_discord(
+                await log_error_to_discord(
                     f"⚠️ **{display_name}** hasn't completed a successful run in "
                     f"{minutes_stale} minute(s). It may have stopped working — check the logs."
                 )

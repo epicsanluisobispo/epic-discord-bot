@@ -11,13 +11,14 @@ team's channel ID typo'd).
 from config import (
     ROLE_GRANT_RULES,
     LOG_CHANNEL_ID,
+    ERROR_LOG_CHANNEL_ID,
     ETL_NOTIFICATIONS_CHANNEL_ID,
     MEDIA_TEAM_CHANNEL_ID,
     LINK_BOARD_CHANNEL_ID,
     LARGE_GROUP_SLIDES_CHANNEL_ID,
     EVENT_TEAM_CHANNEL_MAP,
 )
-from logging_utils import log_to_discord
+from logging_utils import log_to_discord, log_error_to_discord
 
 
 def _collect_role_names_referenced_by_rules():
@@ -33,6 +34,7 @@ def _collect_channel_ids_referenced_by_config():
     """Returns a dict of {human-readable config location: channel ID}."""
     channel_ids_by_config_location = {
         "LOG_CHANNEL_ID": LOG_CHANNEL_ID,
+        "ERROR_LOG_CHANNEL_ID": ERROR_LOG_CHANNEL_ID,
         "ETL_NOTIFICATIONS_CHANNEL_ID": ETL_NOTIFICATIONS_CHANNEL_ID,
         "MEDIA_TEAM_CHANNEL_ID": MEDIA_TEAM_CHANNEL_ID,
         "LINK_BOARD_CHANNEL_ID": LINK_BOARD_CHANNEL_ID,
@@ -47,7 +49,7 @@ async def run_startup_config_checks(bot):
     """Checks config.py against the bot's first guild and posts one
     consolidated warning (or an all-clear) to the log channel."""
     if not bot.guilds:
-        await log_to_discord("⚠️ Startup config check skipped: bot is not in any servers.")
+        await log_error_to_discord("⚠️ Startup config check skipped: bot is not in any servers.")
         return
 
     guild = bot.guilds[0]
@@ -64,6 +66,6 @@ async def run_startup_config_checks(bot):
 
     if problems:
         problems_text = "\n".join(problems)
-        await log_to_discord(f"⚠️ **Startup config check found {len(problems)} issue(s):**\n{problems_text}")
+        await log_error_to_discord(f"⚠️ **Startup config check found {len(problems)} issue(s):**\n{problems_text}")
     else:
         await log_to_discord("✅ Startup config check passed: all configured roles and channels found.")

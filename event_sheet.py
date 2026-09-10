@@ -8,6 +8,7 @@ Background task that polls the event-request Google Sheet and:
 """
 
 import asyncio
+import traceback
 from datetime import datetime
 
 import pytz
@@ -144,6 +145,7 @@ def setup_event_sheet_task(bot):
             clear_failure("event_sheet:unexpected")
         except Exception as error:
             print(f"🛑 Unexpected error in event sheet poll: {error}")
+            print(traceback.format_exc())
             await log_failure_once(
                 "event_sheet:unexpected", f"❌ Event sheet poll failed unexpectedly: {error}"
             )
@@ -235,13 +237,18 @@ async def _run_one_polling_pass(bot):
                         if event_start_datetime and event_end_datetime:
                             calendar_failure_key = f"event_sheet:calendar:{event_description}"
                             try:
-                                await asyncio.to_thread(
+                                calendar_html_link = await asyncio.to_thread(
                                     create_google_calendar_event,
                                     event_description,
                                     event_start_datetime,
                                     event_end_datetime,
                                 )
                                 clear_failure(calendar_failure_key)
+                                etl_notifications_channel = bot.get_channel(ETL_NOTIFICATIONS_CHANNEL_ID)
+                                if etl_notifications_channel:
+                                    await etl_notifications_channel.send(
+                                        f"🗓️ Added **{event_description}** to the calendar: {calendar_html_link}"
+                                    )
                             except Exception as calendar_error:
                                 print(f"🛑 Calendar event failed: {calendar_error}")
                                 await log_failure_once(
@@ -298,6 +305,17 @@ async def _run_one_polling_pass(bot):
                                                 new_discord_event_id,
                                                 context_label=f"event discord-id save, row {row_index + 1}",
                                             )
+                                            discord_event_link = (
+                                                f"https://discord.com/events/{guild.id}/{new_discord_event_id}"
+                                            )
+                                            etl_notifications_channel = bot.get_channel(
+                                                ETL_NOTIFICATIONS_CHANNEL_ID
+                                            )
+                                            if etl_notifications_channel:
+                                                await etl_notifications_channel.send(
+                                                    f"📅 Created a Discord event for **{event_description}**: "
+                                                    f"{discord_event_link}"
+                                                )
                                     else:
                                         print(
                                             f"ℹ️ Event '{event_description}' is more than "
