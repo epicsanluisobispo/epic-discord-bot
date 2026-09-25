@@ -67,6 +67,15 @@ MEDIA_SHEET_QUARTER_TABS = ["Fall Semester", "Spring Semester"]
 MEDIA_ETL_NOTIFIED_STATUS_COLUMN = 24   # Column X
 MEDIA_TEAM_NOTIFIED_STATUS_COLUMN = 25  # Column Y
 
+# Reuses the column freed up when the media reminder feature was removed.
+# Tracks which currently-active links have already had a "new link
+# posted" announcement sent, so a row only ever triggers one alert no
+# matter how many times it's polled or how many times the bot restarts —
+# this ties the "already announced" state to the actual sheet row instead
+# of an in-memory guess based on matching content, which is what the
+# in-memory version this replaced was vulnerable to.
+MEDIA_LINK_ANNOUNCED_STATUS_COLUMN = 26  # Column Z
+
 EVENT_REQUEST_SHEET_URL = "https://docs.google.com/spreadsheets/d/1qBHkcxutxlkn4ZQfx-knbuLwsnrXyYorwjq7OFUQ-M4/edit?usp=sharing"
 EVENT_REQUEST_SHEET_TABS = ["Form Responses 1"]
 
@@ -77,6 +86,15 @@ EVENT_APPROVED_STATUS_COLUMN = 24           # Column X
 EVENT_ETL_NOTIFIED_STATUS_COLUMN = 25       # Column Y
 EVENT_APPROVAL_NOTIFIED_STATUS_COLUMN = 26  # Column Z
 EVENT_DISCORD_EVENT_ID_COLUMN = 27          # Column AA
+
+# Reuses the column freed up when the event-sheet reminder feature was
+# removed. Tracks whether a Calendar event has already been created for
+# this row, independently of the one-time "approved!" notification — this
+# is what lets calendar creation safely run on every poll for an approved
+# row (needed so the alert and the event itself still get created even
+# after the approval notification has already been sent) without ever
+# creating a second, duplicate Calendar event for the same request.
+EVENT_CALENDAR_CREATED_STATUS_COLUMN = 28   # Column AB
 
 # Google Calendar that approved events get added to.
 EVENT_CALENDAR_ID = "epicsanluisobispo@gmail.com"

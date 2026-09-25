@@ -22,6 +22,7 @@ from config import (
     EVENT_ETL_NOTIFIED_STATUS_COLUMN,
     EVENT_APPROVAL_NOTIFIED_STATUS_COLUMN,
     EVENT_DISCORD_EVENT_ID_COLUMN,
+    EVENT_CALENDAR_CREATED_STATUS_COLUMN,
     EVENT_TEAM_CHANNEL_MAP,
     EVENT_CALENDAR_ID,
     ETL_NOTIFICATIONS_CHANNEL_ID,
@@ -173,7 +174,7 @@ async def _run_one_polling_pass(bot):
             if row_index < 1:
                 continue  # Skip header row
 
-            row += [""] * max(0, EVENT_DISCORD_EVENT_ID_COLUMN - len(row))
+            row += [""] * max(0, EVENT_CALENDAR_CREATED_STATUS_COLUMN - len(row))
 
             requester_name = row[1].strip()                  # Column B
             team_name = row[2].strip().lower()                # Column C
@@ -187,6 +188,7 @@ async def _run_one_polling_pass(bot):
             etl_notified_status = row[EVENT_ETL_NOTIFIED_STATUS_COLUMN - 1].strip().lower()
             approval_notified_status = row[EVENT_APPROVAL_NOTIFIED_STATUS_COLUMN - 1].strip().lower()
             discord_scheduled_event_id = row[EVENT_DISCORD_EVENT_ID_COLUMN - 1].strip()
+            calendar_created_status = row[EVENT_CALENDAR_CREATED_STATUS_COLUMN - 1].strip().lower()
 
             # Requests marked recurring don't get a Discord scheduled event —
             # a single Discord event can't represent an ongoing weekly/
@@ -211,30 +213,41 @@ async def _run_one_polling_pass(bot):
                     )
 
             is_event_approved = event_approved_status == "approved"
+            event_description = recurring_event_name or one_time_event_name or "a request"
 
-            # ETL approved -> notify team + create calendar/Discord events.
-            if is_event_approved and approval_notified_status != "sent":
-                event_description = recurring_event_name or one_time_event_name or "a request"
+            # One-time: notify the team channel that this request was
+            # approved. Separate from the calendar/Discord sync below so
+            # that sync keeps running on every poll even after this
+            # notification has already been sent once.
+            if is_event_approved and approval_notified_status != "sent" and team_name in EVENT_TEAM_CHANNEL_MAP:
+                team_channel = bot.get_channel(EVENT_TEAM_CHANNEL_MAP[team_name])
+                if team_channel:
+                    await team_channel.send(
+                        f"✅ Your event request for **{event_description}** has been approved by the ETLs!"
+                    )
+                    await update_cell_with_retry(
+                        worksheet,
+                        row_index + 1,
+                        EVENT_APPROVAL_NOTIFIED_STATUS_COLUMN,
+                        "SENT",
+                        context_label=f"event approval-notified, row {row_index + 1}",
+                    )
 
-                if team_name in EVENT_TEAM_CHANNEL_MAP:
-                    team_channel = bot.get_channel(EVENT_TEAM_CHANNEL_MAP[team_name])
-                    if team_channel:
-                        await team_channel.send(
-                            f"✅ Your event request for **{event_description}** has been approved by the ETLs!"
-                        )
-                        await update_cell_with_retry(
-                            worksheet,
-                            row_index + 1,
-                            EVENT_APPROVAL_NOTIFIED_STATUS_COLUMN,
-                            "SENT",
-                            context_label=f"event approval-notified, row {row_index + 1}",
-                        )
+            # Ongoing: keep the Calendar event and Discord event in sync
+            # for every approved row, every poll — not gated behind the
+            # one-time notification above. This is what makes location/
+            # date edits made after approval actually get picked up, and
+            # what lets an event get cleaned up after it ends. Calendar
+            # creation is guarded by its own status column so re-running
+            # this every poll can't create a second, duplicate Calendar
+            # event for the same request.
+            if is_event_approved and team_name in EVENT_TEAM_CHANNEL_MAP:
+                if event_date_str and event_start_time_str and event_end_time_str:
+                    event_start_datetime = parse_event_datetime(event_date_str, event_start_time_str)
+                    event_end_datetime = parse_event_datetime(event_date_str, event_end_time_str)
 
-                    if event_date_str and event_start_time_str and event_end_time_str:
-                        event_start_datetime = parse_event_datetime(event_date_str, event_start_time_str)
-                        event_end_datetime = parse_event_datetime(event_date_str, event_end_time_str)
-
-                        if event_start_datetime and event_end_datetime:
+                    if event_start_datetime and event_end_datetime:
+                        if calendar_created_status != "sent":
                             calendar_failure_key = f"event_sheet:calendar:{event_description}"
                             try:
                                 calendar_html_link = await asyncio.to_thread(
@@ -244,6 +257,13 @@ async def _run_one_polling_pass(bot):
                                     event_end_datetime,
                                 )
                                 clear_failure(calendar_failure_key)
+                                await update_cell_with_retry(
+                                    worksheet,
+                                    row_index + 1,
+                                    EVENT_CALENDAR_CREATED_STATUS_COLUMN,
+                                    "SENT",
+                                    context_label=f"event calendar-created, row {row_index + 1}",
+                                )
                                 etl_notifications_channel = bot.get_channel(ETL_NOTIFICATIONS_CHANNEL_ID)
                                 if etl_notifications_channel:
                                     await etl_notifications_channel.send(
@@ -256,68 +276,66 @@ async def _run_one_polling_pass(bot):
                                     f"❌ Failed to create calendar event **{event_description}**: {calendar_error}",
                                 )
 
-                            if is_recurring_event:
-                                print(
-                                    f"ℹ️ Event '{event_description}' is recurring; skipping Discord event creation."
-                                )
-                            else:
-                                guild = bot.guilds[0]
-                                days_until_event = (event_start_datetime - now).days
-                                event_is_within_creation_window = (
-                                    0 <= days_until_event <= DISCORD_EVENT_CREATION_WINDOW_DAYS
-                                )
+                        if is_recurring_event:
+                            print(
+                                f"ℹ️ Event '{event_description}' is recurring; skipping Discord event creation."
+                            )
+                        else:
+                            guild = bot.guilds[0]
+                            days_until_event = (event_start_datetime - now).days
+                            event_is_within_creation_window = (
+                                0 <= days_until_event <= DISCORD_EVENT_CREATION_WINDOW_DAYS
+                            )
 
-                                if discord_scheduled_event_id:
-                                    if event_end_datetime < now:
-                                        await delete_discord_scheduled_event(guild, discord_scheduled_event_id)
+                            if discord_scheduled_event_id:
+                                if event_end_datetime < now:
+                                    await delete_discord_scheduled_event(guild, discord_scheduled_event_id)
+                                    await update_cell_with_retry(
+                                        worksheet,
+                                        row_index + 1,
+                                        EVENT_DISCORD_EVENT_ID_COLUMN,
+                                        "",
+                                        context_label=f"event discord-id clear, row {row_index + 1}",
+                                    )
+                                elif event_is_within_creation_window:
+                                    await update_discord_scheduled_event(
+                                        guild,
+                                        discord_scheduled_event_id,
+                                        event_description,
+                                        event_start_datetime,
+                                        event_end_datetime,
+                                        location=event_location or "TBA",
+                                        description=event_description,
+                                    )
+                            else:
+                                if event_is_within_creation_window:
+                                    new_discord_event_id = await create_discord_scheduled_event(
+                                        guild,
+                                        event_description,
+                                        event_start_datetime,
+                                        event_end_datetime,
+                                        location=event_location or "TBA",
+                                        description=event_description,
+                                    )
+                                    if new_discord_event_id:
                                         await update_cell_with_retry(
                                             worksheet,
                                             row_index + 1,
                                             EVENT_DISCORD_EVENT_ID_COLUMN,
-                                            "",
-                                            context_label=f"event discord-id clear, row {row_index + 1}",
+                                            new_discord_event_id,
+                                            context_label=f"event discord-id save, row {row_index + 1}",
                                         )
-                                    elif event_is_within_creation_window:
-                                        await update_discord_scheduled_event(
-                                            guild,
-                                            discord_scheduled_event_id,
-                                            event_description,
-                                            event_start_datetime,
-                                            event_end_datetime,
-                                            location=event_location or "TBA",
-                                            description=event_description,
+                                        discord_event_link = (
+                                            f"https://discord.com/events/{guild.id}/{new_discord_event_id}"
                                         )
+                                        etl_notifications_channel = bot.get_channel(ETL_NOTIFICATIONS_CHANNEL_ID)
+                                        if etl_notifications_channel:
+                                            await etl_notifications_channel.send(
+                                                f"📅 Created a Discord event for **{event_description}**: "
+                                                f"{discord_event_link}"
+                                            )
                                 else:
-                                    if event_is_within_creation_window:
-                                        new_discord_event_id = await create_discord_scheduled_event(
-                                            guild,
-                                            event_description,
-                                            event_start_datetime,
-                                            event_end_datetime,
-                                            location=event_location or "TBA",
-                                            description=event_description,
-                                        )
-                                        if new_discord_event_id:
-                                            await update_cell_with_retry(
-                                                worksheet,
-                                                row_index + 1,
-                                                EVENT_DISCORD_EVENT_ID_COLUMN,
-                                                new_discord_event_id,
-                                                context_label=f"event discord-id save, row {row_index + 1}",
-                                            )
-                                            discord_event_link = (
-                                                f"https://discord.com/events/{guild.id}/{new_discord_event_id}"
-                                            )
-                                            etl_notifications_channel = bot.get_channel(
-                                                ETL_NOTIFICATIONS_CHANNEL_ID
-                                            )
-                                            if etl_notifications_channel:
-                                                await etl_notifications_channel.send(
-                                                    f"📅 Created a Discord event for **{event_description}**: "
-                                                    f"{discord_event_link}"
-                                                )
-                                    else:
-                                        print(
-                                            f"ℹ️ Event '{event_description}' is more than "
-                                            f"{DISCORD_EVENT_CREATION_WINDOW_DAYS} days away; skipping Discord creation."
-                                        )
+                                    print(
+                                        f"ℹ️ Event '{event_description}' is more than "
+                                        f"{DISCORD_EVENT_CREATION_WINDOW_DAYS} days away; skipping Discord creation."
+                                    )
