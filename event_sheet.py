@@ -69,6 +69,16 @@ def parse_event_datetime(date_str, time_str):
     return None
 
 
+def _is_valid_discord_snowflake_id(value):
+    """A real Discord snowflake ID is a plain string of digits (17-19 of
+    them, for IDs in the current era). If Google Sheets ever auto-detects
+    a long digit string as a *number* rather than text, it gets stored as
+    a floating-point value and comes back as something like
+    '1.54015E+18' — scientific notation. That represents permanently lost
+    precision; there's no way to recover the original ID from it."""
+    return value.isdigit() and 15 <= len(value) <= 20
+
+
 def create_google_calendar_event(summary, start_datetime, end_datetime):
     event_body = {
         "summary": summary,
@@ -190,6 +200,28 @@ async def _run_one_polling_pass(bot):
             discord_scheduled_event_id = row[EVENT_DISCORD_EVENT_ID_COLUMN - 1].strip()
             calendar_created_status = row[EVENT_CALENDAR_CREATED_STATUS_COLUMN - 1].strip().lower()
 
+            # If a previously-saved Discord ID got corrupted by Google
+            # Sheets auto-converting it to scientific notation, the ID is
+            # permanently unrecoverable — clear it so the bot treats this
+            # row as if no Discord event exists yet and creates a fresh
+            # one, instead of repeatedly failing to update/delete a value
+            # Discord will never accept.
+            if discord_scheduled_event_id and not _is_valid_discord_snowflake_id(discord_scheduled_event_id):
+                await log_failure_once(
+                    f"event_sheet:corrupted_id:{row_index}",
+                    f"⚠️ Row {row_index + 1}: Discord event ID '{discord_scheduled_event_id}' is corrupted "
+                    f"(likely converted to scientific notation by Google Sheets) and can't be recovered. "
+                    f"Clearing it so a new Discord event can be created next poll.",
+                )
+                await update_cell_with_retry(
+                    worksheet,
+                    row_index + 1,
+                    EVENT_DISCORD_EVENT_ID_COLUMN,
+                    "",
+                    context_label=f"event discord-id corrupted-clear, row {row_index + 1}",
+                )
+                discord_scheduled_event_id = ""
+
             # Requests marked recurring don't get a Discord scheduled event —
             # a single Discord event can't represent an ongoing weekly/
             # monthly series, so we only manage Calendar + team notification
@@ -246,11 +278,18 @@ async def _run_one_polling_pass(bot):
                     event_start_datetime = parse_event_datetime(event_date_str, event_start_time_str)
                     event_end_datetime = parse_event_datetime(event_date_str, event_end_time_str)
 
-                    if event_start_datetime and event_end_datetime:
+                    if event_start_datetime and event_end_datetime and event_end_datetime <= event_start_datetime:
+                        await log_failure_once(
+                            f"event_sheet:bad_time_range:{row_index}",
+                            f"⚠️ Row {row_index + 1} (**{event_description}**): end time is not after "
+                            f"start time — skipping calendar/Discord event creation. Check columns M "
+                            f"(date), N (start time), and O (end time).",
+                        )
+                    elif event_start_datetime and event_end_datetime:
                         if calendar_created_status != "sent":
                             calendar_failure_key = f"event_sheet:calendar:{event_description}"
                             try:
-                                calendar_html_link = await asyncio.to_thread(
+                                await asyncio.to_thread(
                                     create_google_calendar_event,
                                     event_description,
                                     event_start_datetime,
@@ -267,7 +306,7 @@ async def _run_one_polling_pass(bot):
                                 etl_notifications_channel = bot.get_channel(ETL_NOTIFICATIONS_CHANNEL_ID)
                                 if etl_notifications_channel:
                                     await etl_notifications_channel.send(
-                                        f"🗓️ Added **{event_description}** to the calendar: {calendar_html_link}"
+                                        f"🗓️ Added **{event_description}** to the calendar."
                                     )
                             except Exception as calendar_error:
                                 print(f"🛑 Calendar event failed: {calendar_error}")
@@ -318,21 +357,23 @@ async def _run_one_polling_pass(bot):
                                         description=event_description,
                                     )
                                     if new_discord_event_id:
+                                        # Prefixing with an apostrophe forces Google Sheets to store
+                                        # this as plain text rather than auto-detecting it as a number
+                                        # (which is exactly what caused the scientific-notation
+                                        # corruption this same code now also detects and recovers
+                                        # from, above). The apostrophe itself is not stored/returned
+                                        # as part of the cell's value.
                                         await update_cell_with_retry(
                                             worksheet,
                                             row_index + 1,
                                             EVENT_DISCORD_EVENT_ID_COLUMN,
-                                            new_discord_event_id,
+                                            f"'{new_discord_event_id}",
                                             context_label=f"event discord-id save, row {row_index + 1}",
-                                        )
-                                        discord_event_link = (
-                                            f"https://discord.com/events/{guild.id}/{new_discord_event_id}"
                                         )
                                         etl_notifications_channel = bot.get_channel(ETL_NOTIFICATIONS_CHANNEL_ID)
                                         if etl_notifications_channel:
                                             await etl_notifications_channel.send(
-                                                f"📅 Created a Discord event for **{event_description}**: "
-                                                f"{discord_event_link}"
+                                                f"📅 Created a Discord event for **{event_description}**."
                                             )
                                 else:
                                     print(
