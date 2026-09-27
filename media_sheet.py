@@ -5,6 +5,7 @@ notifications when: (1) a new media request is submitted (notify ETLs), and
 """
 
 import asyncio
+import traceback
 from functools import partial
 
 from discord.ext import tasks
@@ -49,6 +50,7 @@ def setup_media_sheet_task(bot):
             clear_failure("media_sheet:unexpected")
         except Exception as error:
             print(f"🛑 Unexpected error in media sheet poll: {error}")
+            print(traceback.format_exc())
             await log_failure_once(
                 "media_sheet:unexpected", f"❌ Media sheet poll failed unexpectedly: {error}"
             )
