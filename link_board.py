@@ -1,6 +1,7 @@
 """
 Background task that keeps a single Discord message updated with the list
-of currently-active links from the media sheet (columns D, I, J, K).
+of currently-active links from the media sheet (columns D, I, J, K), and
+announces newly-active links to the ETL notifications channel.
 
 This replaces the old Flask "/media-links" page: instead of a web page,
 the same "is this link active right now?" logic now renders as an embed
@@ -19,11 +20,13 @@ from discord.ext import tasks
 
 from config import (
     MEDIA_SHEET_QUARTER_TABS,
+    MEDIA_LINK_ANNOUNCED_STATUS_COLUMN,
     LINK_BOARD_CHANNEL_ID,
     ETL_NOTIFICATIONS_CHANNEL_ID,
     SHEET_POLL_INTERVAL_SECONDS,
 )
 from failure_throttle import log_failure_once, clear_failure
+from sheet_utils import update_cell_with_retry
 from media_sheet import spreadsheet
 from task_health import record_task_success
 
@@ -41,19 +44,15 @@ EMBED_DESCRIPTION_CHARACTER_LIMIT = 3900
 # messages on every single poll — only on the first run after a restart.
 _cached_board_message = None
 
-# Tracks which links were active as of the last poll, so newly-added links
-# can be announced separately from the persistent embed. Starts as None
-# (no baseline yet) rather than an empty set, specifically so the very
-# first poll after a bot restart doesn't treat every currently-active link
-# as "new" and spam an announcement for each one.
-_previously_active_links = None
-
 
 def _collect_active_links():
-    """Walk every quarter tab and return a list of (display_name, link)
-    tuples for rows whose active window currently contains `now`."""
+    """Walk every quarter tab and return a list of dicts, one per row
+    whose active window currently contains `now`:
+    {display_name, link, worksheet, row_index, already_announced}.
+    `already_announced` reflects column Z on the sheet itself, so this
+    state survives bot restarts instead of living only in memory."""
     now = datetime.now(PACIFIC_TIMEZONE)
-    active_links = []
+    active_rows = []
 
     for tab_name in MEDIA_SHEET_QUARTER_TABS:
         try:
@@ -67,11 +66,12 @@ def _collect_active_links():
             if row_index < 2:
                 continue  # Skip header rows
 
-            row += [""] * 11
+            row += [""] * max(0, MEDIA_LINK_ANNOUNCED_STATUS_COLUMN - len(row))
             event_name = row[3].strip()       # Column D
             event_link = row[8].strip()       # Column I
             start_date_str = row[9].strip()   # Column J
             end_date_str = row[10].strip()    # Column K
+            announced_status = row[MEDIA_LINK_ANNOUNCED_STATUS_COLUMN - 1].strip().lower()  # Column Z
 
             if not event_link or not start_date_str or not end_date_str:
                 continue
@@ -87,21 +87,27 @@ def _collect_active_links():
 
             if window_start <= now <= window_end:
                 display_name = event_name if event_name else event_link
-                active_links.append((display_name, event_link))
+                active_rows.append({
+                    "display_name": display_name,
+                    "link": event_link,
+                    "worksheet": worksheet,
+                    "row_index": row_index,
+                    "already_announced": announced_status == "sent",
+                })
 
-    return active_links
+    return active_rows
 
 
-def _build_link_board_embed(active_links):
+def _build_link_board_embed(active_rows):
     embed = discord.Embed(
         title="📎 Active Epic SLO Links",
         color=discord.Color.blue(),
     )
 
-    if not active_links:
+    if not active_rows:
         embed.description = "*No active links at the moment. Check back soon!*"
     else:
-        description_lines = [f"• [{display_name}]({event_link})" for display_name, event_link in active_links]
+        description_lines = [f"• [{row['display_name']}]({row['link']})" for row in active_rows]
         description = "\n".join(description_lines)
 
         if len(description) > EMBED_DESCRIPTION_CHARACTER_LIMIT:
@@ -111,6 +117,36 @@ def _build_link_board_embed(active_links):
 
     embed.set_footer(text=f"Last updated {datetime.now(PACIFIC_TIMEZONE).strftime('%b %d, %I:%M %p %Z')}")
     return embed
+
+
+async def _announce_unannounced_links(bot, active_rows):
+    """Sends one alert per active row that hasn't been announced yet
+    (per column Z on the sheet), then marks it so it won't repeat — even
+    across restarts, since the state lives on the sheet, not in memory."""
+    rows_needing_announcement = [row for row in active_rows if not row["already_announced"]]
+    if not rows_needing_announcement:
+        return
+
+    etl_notifications_channel = bot.get_channel(ETL_NOTIFICATIONS_CHANNEL_ID)
+    if etl_notifications_channel is None:
+        return
+
+    for row in rows_needing_announcement:
+        try:
+            await etl_notifications_channel.send(f"🔗 New link posted: [{row['display_name']}]({row['link']})")
+        except Exception as error:
+            await log_failure_once(
+                "link_board:new_link_announce", f"❌ Failed to announce new link to ETL channel: {error}"
+            )
+            continue  # Don't mark it announced if we couldn't actually send the alert.
+
+        await update_cell_with_retry(
+            row["worksheet"],
+            row["row_index"] + 1,
+            MEDIA_LINK_ANNOUNCED_STATUS_COLUMN,
+            "SENT",
+            context_label=f"link board announced, row {row['row_index'] + 1}",
+        )
 
 
 async def _get_or_create_board_message(bot):
@@ -157,39 +193,6 @@ async def _get_or_create_board_message(bot):
     return _cached_board_message
 
 
-async def _announce_newly_active_links(bot, active_links):
-    """Compares the current active links against what was active last
-    poll, and sends one message per link that just became active to the
-    ETL notifications channel. On the very first poll after a restart (no
-    baseline yet), it just records the current set silently instead of
-    announcing everything as "new"."""
-    global _previously_active_links
-
-    current_links = set(active_links)
-
-    if _previously_active_links is None:
-        _previously_active_links = current_links
-        return
-
-    newly_active_links = current_links - _previously_active_links
-    _previously_active_links = current_links
-
-    if not newly_active_links:
-        return
-
-    etl_notifications_channel = bot.get_channel(ETL_NOTIFICATIONS_CHANNEL_ID)
-    if etl_notifications_channel is None:
-        return
-
-    for display_name, event_link in newly_active_links:
-        try:
-            await etl_notifications_channel.send(f"🔗 New link posted: [{display_name}]({event_link})")
-        except Exception as error:
-            await log_failure_once(
-                "link_board:new_link_announce", f"❌ Failed to announce new link to ETL channel: {error}"
-            )
-
-
 def setup_link_board_task(bot):
     @tasks.loop(seconds=SHEET_POLL_INTERVAL_SECONDS)
     async def check_link_board_for_updates():
@@ -202,10 +205,10 @@ def setup_link_board_task(bot):
             if board_message is None:
                 return
 
-            active_links = _collect_active_links()
-            embed = _build_link_board_embed(active_links)
+            active_rows = _collect_active_links()
+            embed = _build_link_board_embed(active_rows)
             await board_message.edit(embed=embed)
-            await _announce_newly_active_links(bot, active_links)
+            await _announce_unannounced_links(bot, active_rows)
             record_task_success(TASK_NAME)
             clear_failure("link_board:edit")
         except Exception as error:
