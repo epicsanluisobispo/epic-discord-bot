@@ -133,7 +133,7 @@ async def _announce_unannounced_links(bot, active_rows):
 
     for row in rows_needing_announcement:
         try:
-            await etl_notifications_channel.send(f"🔗 New link posted: [{row['display_name']}]({row['link']})")
+            await etl_notifications_channel.send(f"🔗 New link posted: **{row['display_name']}** — <{row['link']}>")
         except Exception as error:
             await log_failure_once(
                 "link_board:new_link_announce", f"❌ Failed to announce new link to ETL channel: {error}"
